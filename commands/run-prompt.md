@@ -153,35 +153,40 @@ Duration: {elapsed}
 </claude_foreground>
 
 <claude_background>
-For background execution (`--background`):
-
-Use Task with `run_in_background: true` and include internal verification instructions.
+**Background execution (`--background`):**
 
 ```
 Task(
   prompt: """
-Execute the following task in the background:
-
 <task>
 {prompt_content}
 </task>
 
-<working_directory>
-{cwd}
-</working_directory>
+<working_directory>{cwd}</working_directory>
 
-<verification_instructions>
-After completing the task:
-1. Verify all changes compile/build successfully
-2. Run any relevant tests
-3. Create a completion summary file at {cwd}/COMPLETION.md with:
-   - What was accomplished
-   - Files modified
-   - Any issues encountered
-   - Verification results (build/test status)
-</verification_instructions>
+<completion_protocol>
+When finished, write {cwd}/COMPLETION.md with:
 
-Execute the task completely. Write COMPLETION.md when done.
+# Completion Status
+
+**Status:** SUCCESS | FAILED | PARTIAL
+**Finished:** {timestamp}
+
+## Summary
+[What was accomplished]
+
+## Files Changed
+- path/to/file - description
+
+## Verification
+- [x] or [ ] Build passed
+- [x] or [ ] Tests passed
+
+## Issues (if any)
+[Problems encountered]
+</completion_protocol>
+
+Execute the task completely, then write COMPLETION.md.
 """,
   subagent_type: "general-purpose",
   run_in_background: true
@@ -193,11 +198,58 @@ Report to user:
 Background task started.
 
 Working directory: {cwd}
-Completion file: {cwd}/COMPLETION.md
 
-Check progress with: cat {cwd}/COMPLETION.md
+Check status:
+  cat {cwd}/COMPLETION.md
+
+Watch progress:
+  watch -n 5 'test -f {cwd}/COMPLETION.md && cat {cwd}/COMPLETION.md || echo "Still running..."'
 ```
 </claude_background>
+
+<worktree_background>
+**Worktree + Background combination (`--worktree --background`):**
+
+1. Create worktree first (sync operation)
+2. Spawn background task in worktree
+3. COMPLETION.md written to worktree directory
+4. After completion, changes are in isolated branch
+
+Report to user:
+```
+Background task started in worktree.
+
+Worktree: {worktree_path}
+Branch: {branch_name}
+
+Check status:
+  cat {worktree_path}/COMPLETION.md
+
+After completion:
+  cd {worktree_path}
+  git log --oneline -5
+```
+</worktree_background>
+
+<non_claude_background>
+**Non-Claude background execution:**
+
+For non-Claude models with `--background`, executor.py handles logging.
+
+Report to user:
+```
+Background task started.
+
+Model: {model}
+Log: {log_path}
+
+Watch progress:
+  tail -f {log_path}
+
+Check process:
+  ps -p {pid}
+```
+</non_claude_background>
 
 ### Step 3b: Non-Claude Execution
 
