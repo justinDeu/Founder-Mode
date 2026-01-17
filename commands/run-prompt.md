@@ -179,9 +179,17 @@ Check progress with: cat {cwd}/COMPLETION.md
 Call executor.py for non-Claude models.
 
 <executor_path>
-Locate executor.py (adjust path based on your setup):
+Locate executor.py from the plugin's install path:
 ```bash
-EXECUTOR="/home/thor/fun/founder-mode/daplug/skills/prompt-executor/scripts/executor.py"
+# Get plugin root from installed_plugins.json
+PLUGIN_ROOT=$(jq -r '.plugins."founder-mode@local"[0].installPath // empty' ~/.claude/plugins/installed_plugins.json 2>/dev/null)
+
+# Fallback: check if we're in the plugin directory
+if [ -z "$PLUGIN_ROOT" ]; then
+    PLUGIN_ROOT=$(git rev-parse --show-toplevel 2>/dev/null)
+fi
+
+EXECUTOR="$PLUGIN_ROOT/scripts/executor.py"
 ```
 </executor_path>
 
