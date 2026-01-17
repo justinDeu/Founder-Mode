@@ -13,20 +13,37 @@ allowed-tools:
 
 # Run Prompt
 
-Execute a prompt file using Claude (Task subagent) or external AI models via executor.py.
+Execute a prompt file. Default: runs immediately in Claude with no menus, no confirmations.
 
 ## Arguments
-
-Parse `$ARGUMENTS` for:
 
 | Argument | Type | Default | Description |
 |----------|------|---------|-------------|
 | `<prompt-file>` | positional | required | Path to prompt .md file |
-| `--model` | option | `claude` | Model to use: `claude`, `codex`, `codex-high`, `gemini`, `gemini-high`, etc. |
-| `--background` | flag | false | Run in background (Task with `run_in_background` or executor background mode) |
-| `--worktree` | flag | false | Create isolated git worktree before execution |
-| `--cwd` | option | repo root | Working directory for execution |
-| `--log` | option | auto | Log file path (non-Claude models only) |
+| `--model` | option | `claude` | Model: `claude`, `codex`, `codex-high`, `gemini`, etc. |
+| `--background` | flag | false | Run in background |
+| `--worktree` | flag | false | Create isolated git worktree |
+| `--cwd` | option | repo root | Working directory |
+| `--log` | option | auto | Log file path (non-Claude only) |
+| `--verbose` | flag | false | Show detailed execution metadata |
+
+## Default Execution
+
+**The simple case is simple.**
+
+```
+/founder-mode:run-prompt prompts/fix-bug.md
+```
+
+This:
+1. Reads prompt content
+2. Spawns Task subagent immediately
+3. Waits for completion
+4. Shows result
+
+No model selection. No confirmation dialogs. No decision fatigue.
+
+Options like `--worktree`, `--model`, `--background` only matter when explicitly requested.
 
 ## Execution Flow
 
@@ -105,25 +122,33 @@ Read prompt content and spawn Task subagent.
 ```
 
 <claude_foreground>
-For foreground execution (default):
+**Default foreground execution (no flags):**
 
 ```
 Task(
   prompt: """
-Execute the following task:
-
 <task>
 {prompt_content}
 </task>
 
-<working_directory>
-{cwd}
-</working_directory>
-
-Execute the task completely. When finished, provide a summary of what was accomplished.
+Execute completely. Summarize what was accomplished.
 """,
   subagent_type: "general-purpose"
 )
+```
+
+Output for default case:
+```
+Running: {prompt_file}
+
+{Task result/summary}
+```
+
+If `--verbose` flag is set, also show:
+```
+Model: claude
+Working Directory: {cwd}
+Duration: {elapsed}
 ```
 </claude_foreground>
 
@@ -305,7 +330,28 @@ After completion:
 
 ## Error Handling
 
-- Prompt file not found: Report error, list available prompts in directory
+<error_prompt_not_found>
+If prompt file doesn't exist:
+```
+Prompt not found: {prompt_file}
+
+Available prompts:
+```
+
+Then run `ls ./prompts/*.md` and show available files.
+</error_prompt_not_found>
+
+<error_task_failure>
+If Task subagent fails:
+```
+Task failed.
+
+Check prompt content and try again.
+Error: {error_message}
+```
+</error_task_failure>
+
+Other errors:
 - Worktree creation fails: Report git error, suggest checking branch status
 - Executor not found: Report path issue, check executor location
 - Model not recognized: List available models
