@@ -8,6 +8,7 @@ allowed-tools:
   - Bash
   - Glob
   - Skill
+  - AskUserQuestion
 ---
 
 # Create Prompt
@@ -95,6 +96,14 @@ Determine complexity level for prompt structure:
 
 Based on task type detection, select the appropriate template.
 
+<template_keywords>
+| Template | Keywords | When to Use |
+|----------|----------|-------------|
+| **coding** | build, implement, fix, refactor, create, add, modify, update, change | Building or modifying code, features, components |
+| **research** | research, investigate, explore, understand, learn, discover | Gathering information, learning about a topic |
+| **analysis** | analyze, compare, audit, review, assess, evaluate, examine | Examining existing code, data, or systems |
+</template_keywords>
+
 <template_selection>
 ```
 if keywords match ["build", "implement", "fix", "refactor", "create", "add", "modify", "update", "change"]:
@@ -106,6 +115,8 @@ elif keywords match ["analyze", "compare", "audit", "review", "assess", "evaluat
 else:
     use coding_template  # default
 ```
+
+**Default behavior:** When no keywords match or the task type is ambiguous, default to the coding template since most prompts involve code changes.
 </template_selection>
 
 ### Step 4: Prompt Numbering
