@@ -7,12 +7,96 @@
 <research_summary>
 ## Summary
 
-Researched daplug and GSD to understand how to build a Claude Code plugin foundation. The critical finding is the **ralph-wiggum problem**: sub-agents spawned via Task tool don't inherit skill context from the parent conversation. Daplug solves this through explicit context injection via executor.py, which resolves all paths/metadata upfront and returns JSON that the orchestrator interpolates into Task prompts.
+Researched daplug and GSD to understand how to build a Claude Code plugin foundation. The critical finding is the **ralph-wiggum problem**: sub-agents spawned via Task tool don't inherit skill context from the parent conversation.
 
-The standard approach for configuration is XML blocks in CLAUDE.md (`<daplug_config>`) with project-level overriding user-level. Skills are markdown files with YAML frontmatter. State persists to disk (JSON/markdown) so agents can resume where others stopped.
+**Key architectural decision:** Keep executor.py minimal. Daplug's executor does too much (prompt resolution, worktree creation, dependency installation, CLI launching, loop management). This makes customization difficult. Instead:
 
-**Primary recommendation:** Use daplug's executor pattern for sub-agent handling. Configuration via CLAUDE.md XML blocks. State in .planning/ directory. Skills as self-contained markdown with allowed-tools frontmatter.
+- **executor.py** - ONLY handles running non-Claude CLIs + verification loop polling
+- **Skill layer** - handles everything else (worktrees, config, orchestration) where it's visible and customizable
+
+**Verification loop split:**
+- Claude foreground: Skill makes sequential Task calls with history injection
+- Claude background: Internal verification (sub-agent verifies before returning)
+- Non-Claude: executor.py handles subprocess + log polling
+
+**Primary recommendation:** Thin executor.py for non-Claude subprocess management only. Everything else stays in LLM-accessible skill layer. Configuration via `<founder_mode_config>` in CLAUDE.md. Project data in `.founder_mode/` directory.
 </research_summary>
+
+<final_architecture>
+## Final Architecture Decisions
+
+### Executor.py - Minimal Scope
+**Only handles what REQUIRES Python:**
+```
+executor.py --prompt <file> --cwd <dir> --model <model> --log <file> [--loop]
+```
+- Running non-Claude CLIs (subprocess management)
+- Verification loop polling for non-Claude (LLM can't sleep/wait)
+- Log file management
+
+**Does NOT handle (stays in skill layer):**
+- Worktree creation → `Bash(git worktree add...)`
+- Issue fetching → `Bash(gh issue view...)`
+- Prompt resolution → `Read(./prompts/001-*.md)`
+- Parallel orchestration → multiple `Task()` calls
+- Configuration → `Read(CLAUDE.md)`, parse in skill
+- Permission setup → `Edit(~/.claude/settings.json)`
+
+### Verification Loop Split
+| Scenario | Loop Location | Mechanism |
+|----------|---------------|-----------|
+| Claude foreground | Skill orchestrator | Sequential Task calls with history injection |
+| Claude background | Inside sub-agent | Sub-agent self-verifies, retries internally before returning |
+| Non-Claude (any) | executor.py | Subprocess + log polling |
+
+### Claude Background Tasks - Internal Verification
+```
+Task(
+  subagent_type: "general-purpose",
+  run_in_background: true,
+  prompt: """
+    {context injection}
+    Execute: {prompt}
+
+    <verification_requirement>
+    Before returning, verify your work:
+    1. Run tests
+    2. Check build
+    3. Confirm changes work
+
+    If verification fails, fix and retry.
+    Do NOT return until verification passes or genuinely stuck.
+
+    When done: <verification>VERIFICATION_COMPLETE</verification>
+    If stuck: <verification>STUCK: {what you tried}</verification>
+    </verification_requirement>
+  """
+)
+```
+
+### Directory Structure
+```
+.founder_mode/              # founder-mode's project data
+├── logs/                   # Execution logs
+└── state/                  # Loop state, progress
+
+./prompts/                  # Ephemeral prompts (separate, user preference)
+└── 001-fix-bug.md
+
+# Plugin installs wherever Claude Code puts it
+# Skills reference via ~/.claude/plugins/installed_plugins.json
+```
+
+### Configuration
+```xml
+<!-- In CLAUDE.md (project or user level) -->
+<founder_mode_config>
+worktree_dir: ~/.worktrees/
+logs_dir: .founder_mode/logs/
+</founder_mode_config>
+```
+Priority: project CLAUDE.md > user ~/.claude/CLAUDE.md
+</final_architecture>
 
 <standard_stack>
 ## Standard Stack
@@ -20,10 +104,10 @@ The standard approach for configuration is XML blocks in CLAUDE.md (`<daplug_con
 ### Core Components
 | Component | Implementation | Purpose | Why Standard |
 |-----------|---------------|---------|--------------|
-| Skills | `~/.claude/commands/{namespace}/*.md` | User-invocable commands | Claude Code native pattern |
-| Configuration | `<daplug_config>` in CLAUDE.md | User settings | Readable, editable, version-controllable |
-| State | `.planning/STATE.md` | Project memory | Visible, auditable, git-tracked |
-| Sub-agent handling | Python executor script | Context injection | Solves ralph-wiggum problem |
+| Skills | Plugin directory (distributed) | User-invocable commands | Claude Code native pattern |
+| Configuration | `<founder_mode_config>` in CLAUDE.md | User settings | Readable, editable, version-controllable |
+| Project data | `.founder_mode/` | Logs, state | Visible, per-project |
+| Executor | Minimal Python script | Non-Claude subprocess + loop | Only what LLM can't do |
 
 ### Supporting Components
 | Component | Implementation | Purpose | When to Use |
@@ -160,14 +244,21 @@ Next agent receives this in prompt, verifies commits exist, continues from Task 
 
 | Problem | Don't Build | Use Instead | Why |
 |---------|-------------|-------------|-----|
-| Config reading | Custom parser | Daplug's config.py pattern | Handles priority, legacy migration, validation |
-| Sub-agent context | Hoping for inheritance | Executor pattern with JSON | Ralph-wiggum problem is real |
-| Worktree management | Manual git commands | Executor with dependency install | Edge cases: conflicts, permissions, cleanup |
-| State persistence | In-memory variables | Markdown files in .planning/ | Sessions end, files persist |
-| Loop verification | Manual re-running | Loop state with markers | Need history, retry reasons, suggested next steps |
-| Permission setup | Manual settings.json editing | Programmatic via config.py | Consistent, won't break existing permissions |
+| Non-Claude CLI execution | Bash subprocess calls | Minimal executor.py | Need proper process management, log capture |
+| Non-Claude verification loop | Manual re-checking | executor.py --loop | LLM can't sleep/poll |
+| Context inheritance | Hoping Task inherits | Explicit prompt injection | Ralph-wiggum problem is real |
 
-**Key insight:** Daplug has solved these problems. The executor.py pattern handles worktree creation, dependency installation, CLI launching, verification loops, and state management. Don't rebuild this from scratch.
+**But DO hand-roll in skill layer (more flexible):**
+
+| Problem | Daplug Does in Python | Founder-mode Does in Skill | Why Better |
+|---------|----------------------|---------------------------|------------|
+| Worktree creation | executor.py | `Bash(git worktree add...)` | Visible, customizable |
+| Issue fetching | executor.py | `Bash(gh issue view...)` | Easy to add Jira, Linear, etc. |
+| Config reading | config.py | `Read(CLAUDE.md)` + parse | No Python debugging |
+| Parallel orchestration | Complex Python | Multiple `Task()` calls | LLM decides parallelism |
+| Prompt resolution | Python glob/match | `Read()` + `Glob()` | Transparent |
+
+**Key insight:** Daplug's executor does too much in Python, making customization hard. Keep executor minimal, do everything else in the skill layer where you can see it and inject into it.
 </dont_hand_roll>
 
 <common_pitfalls>
