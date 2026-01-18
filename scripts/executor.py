@@ -3,6 +3,7 @@
 
 import argparse
 import json
+import os
 import re
 import subprocess
 import sys
@@ -10,24 +11,94 @@ import time
 from pathlib import Path
 
 
-MODEL_COMMANDS = {
-    "codex": lambda prompt: (["codex", "exec", "--full-auto", "-"], prompt, True),
-    "gemini": lambda prompt: (["gemini", "-y", "-p", prompt], None, False),
-    "zai": lambda prompt: (["zai", "-p", prompt], None, False),
+# Model configuration structure:
+# - command: base command list (prompt will be appended for positional mode)
+# - stdin_mode: "stdin" (pipe prompt to stdin) or "positional" (append prompt to command)
+# - env: environment variables to set (merged with current env)
+MODEL_CONFIG = {
+    # Existing models
+    "codex": {
+        "command": ["codex", "exec", "--full-auto", "-"],
+        "stdin_mode": "stdin",
+        "env": {},
+    },
+    "gemini": {
+        "command": ["gemini", "-y", "-p"],
+        "stdin_mode": "positional",
+        "env": {},
+    },
+    "zai": {
+        "command": ["zai", "-p"],
+        "stdin_mode": "positional",
+        "env": {},
+    },
+    # OpenCode variants
+    "opencode": {
+        "command": ["opencode", "run"],
+        "stdin_mode": "positional",
+        "env": {},
+    },
+    "opencode-zai": {
+        "command": ["opencode", "--model", "zai/glm-4.7", "run"],
+        "stdin_mode": "positional",
+        "env": {},
+    },
+    "opencode-codex": {
+        "command": ["opencode", "--model", "openai/gpt-5.2-codex", "run"],
+        "stdin_mode": "positional",
+        "env": {},
+    },
+    # Claude with Z.AI backend
+    "claude-zai": {
+        "command": ["claude", "-p"],
+        "stdin_mode": "positional",
+        "env": {
+            "ANTHROPIC_BASE_URL": "https://api.z.ai/api/anthropic",
+            # ANTHROPIC_AUTH_TOKEN must be set in user's environment
+        },
+        "extra_args": ["--dangerously-skip-permissions"],
+    },
 }
+
+
+def get_model_command(model: str, prompt: str) -> tuple[list[str], str | None, bool, dict]:
+    """Build command for model. Returns (cmd, stdin_data, uses_stdin, env_vars)."""
+    if model not in MODEL_CONFIG:
+        raise ValueError(f"Unknown model: {model}. Supported: {list(MODEL_CONFIG.keys())}")
+
+    config = MODEL_CONFIG[model]
+    cmd = list(config["command"])  # Copy to avoid mutation
+    uses_stdin = config["stdin_mode"] == "stdin"
+    env_vars = config.get("env", {})
+
+    # Add extra args if present
+    if "extra_args" in config:
+        cmd.extend(config["extra_args"])
+
+    if uses_stdin:
+        stdin_data = prompt
+    else:
+        cmd.append(prompt)
+        stdin_data = None
+
+    return cmd, stdin_data, uses_stdin, env_vars
 
 VERIFICATION_PATTERN = re.compile(r"<verification>(.*?)</verification>", re.DOTALL)
 
 
 def run_cli(model: str, prompt: str, cwd: str, log_path: Path) -> bool:
     """Run the CLI for the given model. Returns True on success."""
-    if model not in MODEL_COMMANDS:
-        raise ValueError(f"Unknown model: {model}. Supported: {list(MODEL_COMMANDS.keys())}")
+    cmd, stdin_data, uses_stdin, env_vars = get_model_command(model, prompt)
 
-    cmd, stdin_data, uses_stdin = MODEL_COMMANDS[model](prompt)
+    # Merge environment variables with current environment
+    env = None
+    if env_vars:
+        env = os.environ.copy()
+        env.update(env_vars)
 
     with open(log_path, "a") as log_file:
         log_file.write(f"\n--- Execution at {time.strftime('%Y-%m-%d %H:%M:%S')} ---\n")
+        log_file.write(f"--- Model: {model} | Command: {' '.join(cmd[:3])}... ---\n")
         log_file.flush()
 
         proc = subprocess.run(
@@ -37,6 +108,7 @@ def run_cli(model: str, prompt: str, cwd: str, log_path: Path) -> bool:
             stdout=log_file,
             stderr=subprocess.STDOUT,
             text=True,
+            env=env,
         )
 
     return proc.returncode == 0
@@ -81,7 +153,8 @@ def main():
     parser = argparse.ArgumentParser(description="Execute non-Claude CLI models")
     parser.add_argument("--prompt", required=True, help="Path to prompt file")
     parser.add_argument("--cwd", required=True, help="Working directory for execution")
-    parser.add_argument("--model", required=True, help="Model to use (codex, gemini, zai)")
+    parser.add_argument("--model", required=True,
+                        help="Model to use: codex, gemini, zai, opencode, opencode-zai, opencode-codex, claude-zai")
     parser.add_argument("--log", required=True, help="Path to log file")
     parser.add_argument("--loop", action="store_true", help="Enable verification loop")
     parser.add_argument("--max-iterations", type=int, default=3, help="Max loop iterations")

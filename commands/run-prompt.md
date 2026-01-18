@@ -1,7 +1,7 @@
 ---
 name: founder-mode:run-prompt
 description: Execute a prompt with Claude or other AI models
-argument-hint: <prompt-file> [--model claude|codex|gemini] [--background] [--worktree]
+argument-hint: <prompt-file> [--model ?|claude|codex|gemini|...] [--background] [--worktree]
 allowed-tools:
   - Read
   - Write
@@ -20,7 +20,7 @@ Execute a prompt file. Default: runs immediately in Claude with no menus, no con
 | Argument | Type | Default | Description |
 |----------|------|---------|-------------|
 | `<prompt-file>` | positional | required | Path to prompt .md file |
-| `--model` | option | `claude` | Model: `claude`, `codex`, `codex-high`, `gemini`, etc. |
+| `--model` | option | (prompt) | Model to use. Omit or use `?` to select interactively. |
 | `--background` | flag | false | Run in background |
 | `--worktree` | flag | false | Create isolated git worktree |
 | `--cwd` | option | repo root | Working directory |
@@ -29,7 +29,7 @@ Execute a prompt file. Default: runs immediately in Claude with no menus, no con
 
 ## Default Execution
 
-**The simple case is simple.**
+When no `--model` is specified (or `--model ?` is used), prompt the user to select a model:
 
 ```
 /founder-mode:run-prompt prompts/fix-bug.md
@@ -37,13 +37,14 @@ Execute a prompt file. Default: runs immediately in Claude with no menus, no con
 
 This:
 1. Reads prompt content
-2. Spawns Task subagent immediately
-3. Waits for completion
+2. Asks user to select a model
+3. Executes with chosen model
 4. Shows result
 
-No model selection. No confirmation dialogs. No decision fatigue.
-
-Options like `--worktree`, `--model`, `--background` only matter when explicitly requested.
+To skip the prompt and run immediately, specify a model explicitly:
+```
+/founder-mode:run-prompt prompts/fix-bug.md --model claude
+```
 
 ## Execution Flow
 
@@ -54,7 +55,7 @@ Determine execution mode based on `--model`:
 - Execute via Task subagent
 - Prompt content injected directly into Task prompt
 
-**Non-Claude models**: `codex`, `codex-high`, `codex-xhigh`, `gemini`, `gemini-high`, `gemini-xhigh`, `zai`, `local`, etc.
+**Non-Claude models**: `codex`, `codex-high`, `codex-xhigh`, `gemini`, `gemini-high`, `gemini-xhigh`, `zai`, `opencode`, `opencode-zai`, `opencode-codex`, `claude-zai`, `local`, etc.
 - Execute via executor.py script
 - Parse JSON result and report status
 </mode_detection>
@@ -63,7 +64,7 @@ Determine execution mode based on `--model`:
 
 ```
 prompt_file = first positional argument (required)
-model = --model value or "claude"
+model = --model value or null (not specified)
 background = --background flag present
 worktree = --worktree flag present
 cwd = --cwd value or current repo root
@@ -75,7 +76,19 @@ Validate prompt file exists:
 test -f "$prompt_file" && echo "exists" || echo "missing"
 ```
 
-### Step 2: Worktree Creation (if --worktree)
+### Step 2: Model Selection (if no --model or --model ?)
+
+If `model` is null or `?`, prompt the user to select a model.
+
+Use AskUserQuestion tool with options:
+- `claude` - Claude in current session
+- `claude-zai` - Claude CLI with Z.AI backend
+- `codex` - OpenAI gpt-5.2-codex via codex CLI
+- `gemini` - Gemini 3 Flash via gemini CLI
+- `opencode-zai` - OpenCode with Z.AI GLM-4.7
+- `opencode-codex` - OpenCode with gpt-5.2-codex
+
+### Step 3: Worktree Creation (if --worktree)
 
 Create isolated git worktree for execution. This happens in the skill layer, not executor.
 
@@ -111,7 +124,7 @@ cp "$prompt_file" "$WORKTREE_PATH/TASK.md"
 
 Update `cwd` to `$WORKTREE_PATH` for subsequent execution.
 
-### Step 3a: Claude Execution (default)
+### Step 4a: Claude Execution
 
 Read prompt content and spawn Task subagent.
 
@@ -251,7 +264,7 @@ Check process:
 ```
 </non_claude_background>
 
-### Step 3b: Non-Claude Execution
+### Step 4b: Non-Claude Execution
 
 Call executor.py for non-Claude models.
 
@@ -317,7 +330,7 @@ Extract and report:
 - `execution.log`: log file path
 </parse_result>
 
-### Step 4: Report Status
+### Step 5: Report Status
 
 <output_format>
 Present execution status to user:
@@ -368,17 +381,21 @@ After completion:
 
 ## Model Reference
 
-| Model | Type | Description |
-|-------|------|-------------|
-| `claude` | Task subagent | Claude in current context |
-| `codex` | executor.py | OpenAI Codex (gpt-5.2-codex) |
-| `codex-high` | executor.py | Codex with high reasoning |
-| `codex-xhigh` | executor.py | Codex with max reasoning |
-| `gemini` | executor.py | Gemini 3 Flash |
-| `gemini-high` | executor.py | Gemini 2.5 Pro |
-| `gemini-xhigh` | executor.py | Gemini 3 Pro |
-| `zai` | executor.py | Z.AI GLM-4.7 |
-| `local` | executor.py | Local model via LMStudio |
+| Model | Type | CLI | Description |
+|-------|------|-----|-------------|
+| `claude` | Task subagent | claude | Claude in current context |
+| `codex` | executor.py | codex | OpenAI Codex (gpt-5.2-codex) |
+| `codex-high` | executor.py | codex | Codex with high reasoning |
+| `codex-xhigh` | executor.py | codex | Codex with max reasoning |
+| `gemini` | executor.py | gemini | Gemini 3 Flash |
+| `gemini-high` | executor.py | gemini | Gemini 2.5 Pro |
+| `gemini-xhigh` | executor.py | gemini | Gemini 3 Pro |
+| `zai` | executor.py | zai | Z.AI GLM-4.7 |
+| `opencode` | executor.py | opencode | OpenCode with default model (zen) |
+| `opencode-zai` | executor.py | opencode | OpenCode with Z.AI GLM-4.7 |
+| `opencode-codex` | executor.py | opencode | OpenCode with gpt-5.2-codex |
+| `claude-zai` | executor.py | claude | Claude CLI with Z.AI backend |
+| `local` | executor.py | lmstudio | Local model via LMStudio |
 
 ## Error Handling
 
