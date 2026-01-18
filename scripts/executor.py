@@ -11,10 +11,61 @@ import time
 from pathlib import Path
 
 
+# Z.AI Provider Documentation
+# ============================
+# Z.AI has multiple provider prefixes with different API access levels:
+#
+# - zai/glm-4.7: Base provider. May have restricted API access, causing
+#   silent failures where requests appear to succeed but produce no useful
+#   output (empty responses, truncated completions, or no tool calls).
+#
+# - zai-coding-plan/glm-4.7: Coding-specific endpoint with proper API access.
+#   This is the known-working provider for code generation tasks.
+#
+# When troubleshooting Z.AI issues:
+# 1. Check if the provider prefix matches a known-working provider
+# 2. Silent failures (no errors but bad output) usually indicate wrong provider
+# 3. The zai-coding-plan/ prefix is required for full API functionality
+#
+# Known providers:
+ZAI_KNOWN_WORKING_PROVIDERS = ["zai-coding-plan/glm-4.7"]
+ZAI_PROBLEMATIC_PROVIDERS = ["zai/glm-4.7"]
+
+
+def validate_zai_provider(model_name: str, command: list[str]) -> None:
+    """Warn if using a problematic Z.AI provider.
+
+    Checks command arguments for zai provider strings and warns if
+    a problematic provider is detected. Does not block execution.
+    """
+    # Look for provider in command arguments
+    for arg in command:
+        if "/" not in arg:
+            continue
+        # Check for problematic providers
+        for problematic in ZAI_PROBLEMATIC_PROVIDERS:
+            if problematic in arg:
+                print(
+                    f"Warning: Model '{model_name}' uses provider '{arg}' which may have "
+                    f"API access issues causing silent failures.\n"
+                    f"Consider using one of: {ZAI_KNOWN_WORKING_PROVIDERS}",
+                    file=sys.stderr,
+                )
+                return
+        # Log known-working providers for debugging
+        for working in ZAI_KNOWN_WORKING_PROVIDERS:
+            if working in arg:
+                # Debug log: uncomment if needed for troubleshooting
+                # print(f"Debug: Using known-working Z.AI provider: {arg}", file=sys.stderr)
+                return
+
+
 # Model configuration structure:
 # - command: base command list (prompt will be appended for positional mode)
 # - stdin_mode: "stdin" (pipe prompt to stdin) or "positional" (append prompt to command)
 # - env: environment variables to set (merged with current env)
+# - env_from: map of {TARGET_VAR: SOURCE_VAR} to read from current env and set as TARGET_VAR
+#   e.g., {"ANTHROPIC_AUTH_TOKEN": "ZAI_API_KEY"} reads ZAI_API_KEY and sets ANTHROPIC_AUTH_TOKEN
 MODEL_CONFIG = {
     # Existing models
     "codex": {
@@ -49,12 +100,15 @@ MODEL_CONFIG = {
         "env": {},
     },
     # Claude with Z.AI backend
+    # Requires ZAI_API_KEY environment variable to be set
     "claude-zai": {
         "command": ["claude", "-p"],
         "stdin_mode": "positional",
         "env": {
             "ANTHROPIC_BASE_URL": "https://api.z.ai/api/anthropic",
-            # ANTHROPIC_AUTH_TOKEN must be set in user's environment
+        },
+        "env_from": {
+            "ANTHROPIC_AUTH_TOKEN": "ZAI_API_KEY",
         },
         "extra_args": ["--dangerously-skip-permissions"],
     },
@@ -69,7 +123,21 @@ def get_model_command(model: str, prompt: str) -> tuple[list[str], str | None, b
     config = MODEL_CONFIG[model]
     cmd = list(config["command"])  # Copy to avoid mutation
     uses_stdin = config["stdin_mode"] == "stdin"
-    env_vars = config.get("env", {})
+    env_vars = dict(config.get("env", {}))  # Copy to allow mutation
+
+    # Resolve env_from: maps target env var -> source env var name
+    # e.g., {"ANTHROPIC_AUTH_TOKEN": "ZAI_API_KEY"} reads ZAI_API_KEY and sets ANTHROPIC_AUTH_TOKEN
+    if "env_from" in config:
+        for target_var, source_var in config["env_from"].items():
+            value = os.environ.get(source_var)
+            if value:
+                env_vars[target_var] = value
+            else:
+                print(f"Warning: {source_var} not set, {target_var} will not be configured",
+                      file=sys.stderr)
+
+    # Validate Z.AI providers and warn about potential issues
+    validate_zai_provider(model, cmd)
 
     # Add extra args if present
     if "extra_args" in config:
@@ -194,7 +262,7 @@ def main():
     parser.add_argument("--cwd", required=True, help="Working directory for execution")
     parser.add_argument("--model", required=True,
                         help="Model to use: codex, gemini, zai, opencode, opencode-zai, opencode-codex, claude-zai")
-    parser.add_argument("--log", required=True, help="Path to log file")
+    parser.add_argument("--log", default=None, help="Path to log file (auto-generated if not provided)")
     parser.add_argument("--background", action="store_true", help="Run in background (non-blocking)")
     parser.add_argument("--loop", action="store_true", help="Enable verification loop")
     parser.add_argument("--max-iterations", type=int, default=3, help="Max loop iterations")
@@ -204,8 +272,15 @@ def main():
     args = parser.parse_args()
 
     prompt_path = Path(args.prompt)
-    log_path = Path(args.log)
     cwd = args.cwd
+
+    # Auto-generate log path if not provided
+    if args.log:
+        log_path = Path(args.log)
+    else:
+        timestamp = time.strftime('%Y%m%d-%H%M%S')
+        prompt_basename = prompt_path.stem
+        log_path = Path(cwd) / ".founder-mode" / "logs" / f"{prompt_basename}_{timestamp}.log"
 
     if not prompt_path.exists():
         print(json.dumps({"status": "error", "message": f"Prompt file not found: {args.prompt}"}))
