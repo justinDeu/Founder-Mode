@@ -18,14 +18,14 @@ Configure founder-mode using the `<founder_mode_config>` block in your project's
 ```xml
 <founder_mode_config>
 worktree_dir: ~/.worktrees/
-logs_dir: .founder_mode/logs/
+logs_dir: .founder-mode/logs/
 prompts_dir: ./prompts/
 </founder_mode_config>
 ```
 
 **Settings:**
 - `worktree_dir` - Where to create isolated worktrees (default: `.worktrees/`)
-- `logs_dir` - Where to store execution logs (default: `.founder_mode/logs/`)
+- `logs_dir` - Where to store execution logs (default: `.founder-mode/logs/`)
 - `prompts_dir` - Where prompts live (default: `./prompts/`)
 
 Priority: project CLAUDE.md > user ~/.claude/CLAUDE.md
@@ -50,4 +50,26 @@ Execute a prompt with Claude or other AI models.
 ```
 /founder-mode:run-prompt prompts/001-setup.md
 /founder-mode:run-prompt prompts/001-setup.md --model codex --worktree
+```
+
+### /founder-mode:orchestrate
+
+Execute multiple prompts with dependency management and parallel execution.
+
+```
+/founder-mode:orchestrate <orchestrator-file|prompt-list> [--model ?|claude|codex|...] [--pending-only]
+```
+
+**Arguments:**
+- `<input>` - Orchestrator .md file OR comma-separated prompt IDs
+- `--model` - Default model. Use `?` for per-prompt selection.
+- `--pending-only` - Skip prompts marked complete in orchestrator
+- `--worktree` - Create isolated worktree per prompt
+- `--background` - Run non-Claude models in background
+
+**Examples:**
+```
+/founder-mode:orchestrate prompts/phase-completion/000-orchestrator.md
+/founder-mode:orchestrate 003-01,003-02,003-03 --model codex
+/founder-mode:orchestrate prompts/000-orchestrator.md --pending-only --background
 ```

@@ -1,0 +1,13 @@
+# Logs and runtime state
+.founder-mode/logs/
+!.founder-mode/logs/.gitkeep
+
+# Worktrees
+.worktrees/
+
+# Plan files (ephemeral)
+plan_*.md
+
+# Python
+__pycache__/
+*.pyc

@@ -87,7 +87,7 @@ VERIFICATION_PATTERN = re.compile(r"<verification>(.*?)</verification>", re.DOTA
 
 
 def run_cli(model: str, prompt: str, cwd: str, log_path: Path) -> bool:
-    """Run the CLI for the given model. Returns True on success."""
+    """Run the CLI for the given model (blocking). Returns True on success."""
     cmd, stdin_data, uses_stdin, env_vars = get_model_command(model, prompt)
 
     # Merge environment variables with current environment
@@ -112,6 +112,45 @@ def run_cli(model: str, prompt: str, cwd: str, log_path: Path) -> bool:
         )
 
     return proc.returncode == 0
+
+
+def run_cli_background(model: str, prompt: str, cwd: str, log_path: Path) -> int:
+    """Run the CLI for the given model in background. Returns PID."""
+    cmd, stdin_data, uses_stdin, env_vars = get_model_command(model, prompt)
+
+    # Merge environment variables with current environment
+    env = os.environ.copy()
+    if env_vars:
+        env.update(env_vars)
+
+    # Ensure log directory exists
+    log_path.parent.mkdir(parents=True, exist_ok=True)
+
+    # Open log file for the subprocess
+    log_file = open(log_path, "a")
+    log_file.write(f"\n--- Background execution at {time.strftime('%Y-%m-%d %H:%M:%S')} ---\n")
+    log_file.write(f"--- Model: {model} | Command: {' '.join(cmd[:3])}... ---\n")
+    log_file.flush()
+
+    # Spawn background process with session isolation
+    proc = subprocess.Popen(
+        cmd,
+        cwd=cwd,
+        stdin=subprocess.PIPE if uses_stdin else None,
+        stdout=log_file,
+        stderr=subprocess.STDOUT,
+        text=True,
+        env=env,
+        start_new_session=True,  # Isolate from terminal
+    )
+
+    # Write stdin data if needed, then close
+    if uses_stdin and stdin_data:
+        proc.stdin.write(stdin_data)
+        proc.stdin.close()
+
+    # Note: log_file intentionally not closed - subprocess owns it now
+    return proc.pid
 
 
 def check_verification(log_path: Path) -> tuple[str, str | None]:
@@ -156,6 +195,7 @@ def main():
     parser.add_argument("--model", required=True,
                         help="Model to use: codex, gemini, zai, opencode, opencode-zai, opencode-codex, claude-zai")
     parser.add_argument("--log", required=True, help="Path to log file")
+    parser.add_argument("--background", action="store_true", help="Run in background (non-blocking)")
     parser.add_argument("--loop", action="store_true", help="Enable verification loop")
     parser.add_argument("--max-iterations", type=int, default=3, help="Max loop iterations")
     parser.add_argument("--completion-marker", default="VERIFICATION_COMPLETE",
@@ -174,6 +214,19 @@ def main():
     original_prompt = prompt_path.read_text()
     log_path.parent.mkdir(parents=True, exist_ok=True)
 
+    # Background execution: spawn and return immediately
+    if args.background:
+        pid = run_cli_background(args.model, original_prompt, cwd, log_path)
+        result = {
+            "status": "running",
+            "pid": pid,
+            "log_path": str(log_path.absolute()),
+            "model": args.model,
+        }
+        print(json.dumps(result))
+        sys.exit(0)
+
+    # Foreground execution with optional verification loop
     iterations = 0
     status = "unknown"
     current_prompt = original_prompt
