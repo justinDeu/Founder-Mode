@@ -26,9 +26,18 @@ Moving rapidly in the right direction at all times with a clear vision.
 
 **Project Management (from GSD)**
 - [ ] Greenfield project initialization with in-depth decision gathering
-- [ ] Roadmap creation with phases
-- [ ] Plan creation and execution
+- [ ] Roadmap creation with phases and requirements traceability (REQ-IDs)
+- [ ] Discussion phase for capturing user vision before planning
+- [ ] Plan creation with validation loop (planner → checker → revise)
+- [ ] Plan execution with wave-based parallelization
 - [ ] Progress tracking and state management
+
+**Verification Layer (dual pattern)**
+- [ ] Pre-execution plan validation (catches bad plans before burning context)
+  - Requirement coverage, task completeness, dependency correctness, scope sanity
+- [ ] Post-execution goal-backward verification (catches stub completion)
+  - Truths → Artifacts → Key links analysis
+- [ ] Ralph Wiggums self-healing retry remains for execution-level failures
 
 **External Integrations**
 - [ ] Pull tasks from GitHub issues
@@ -95,6 +104,7 @@ Use founder-mode to build founder-mode as quickly as possible. The tool should b
 | Unify daplug + GSD | Both tools have complementary strengths; combining avoids context switching | - Pending |
 | Full scope in v1 | Core value is moving rapidly; artificial constraints slow momentum | - Pending |
 | Skills-based architecture | Avoids daplug's Python rigidity, keeps everything in user-configurable markdown | - Pending |
+| Dual verification pattern | Pre-execution plan validation catches bad plans before wasting context; post-execution goal-backward verification catches stub completion; Ralph Wiggums handles execution retries. Three layers address different failure modes. | - Pending |
 
 ---
 *Last updated: 2026-01-16 after initialization*

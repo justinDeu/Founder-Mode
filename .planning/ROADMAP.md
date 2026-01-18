@@ -52,16 +52,31 @@ Key deliverables:
 ### Phase 3: Project Management
 **Goal**: Implement greenfield project workflows that are transparent about decisions and show clear progress
 **Depends on**: Phase 2
-**Research**: Unlikely (adapting GSD patterns, internal work)
+**Research**: Likely (GSD's recent verification patterns, goal-backward analysis)
+**Research topics**: GSD plan-checker dimensions, goal-backward verification, must_haves derivation, context budget management
 **Plans**: TBD
 
 Key deliverables:
-- /new-project with deep context gathering
-- /create-roadmap with phase breakdown
-- /plan-phase and /execute-plan
-- Clean state management
+- /new-project with deep context gathering (unified flow: questions → research → requirements → roadmap)
+- /discuss-phase for capturing user vision before planning (gray area analysis)
+- /plan-phase with plan validation loop
+- /execute-phase with wave-based parallel execution
+- Clean state management with requirements traceability (REQ-IDs)
 - Progress indicators during execution
-- Consultation before assumptions
+
+**Verification layer (both patterns):**
+- Pre-execution plan validation (GSD's plan-checker pattern):
+  - Requirement coverage (all requirements have tasks)
+  - Task completeness (Files/Action/Verify/Done present)
+  - Dependency correctness (no cycles, valid DAG)
+  - Scope sanity (2-3 tasks per plan, context budget)
+  - Planner → Checker → Revise loop (max 3 iterations)
+- Post-execution goal-backward verification (GSD's verifier pattern):
+  - Truths: What must be true for goal achievement?
+  - Artifacts: What must exist for those truths?
+  - Key links: What must be wired for artifacts to work?
+  - Catches stub completion (file exists but empty/placeholder)
+- Ralph Wiggums retry loop remains for execution-level self-healing
 
 ### Phase 4: External Integrations
 **Goal**: Pull tasks from and push issues to GitHub and Jira
