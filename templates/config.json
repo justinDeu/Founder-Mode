@@ -1,0 +1,176 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "founder-mode Configuration",
+  "description": "Workflow preferences for founder-mode project management",
+  "type": "object",
+  "properties": {
+    "project": {
+      "type": "object",
+      "description": "Project-level settings",
+      "properties": {
+        "name": {
+          "type": "string",
+          "description": "Project name"
+        },
+        "root": {
+          "type": "string",
+          "description": "Project root directory (default: repository root)"
+        }
+      }
+    },
+    "directories": {
+      "type": "object",
+      "description": "Directory locations",
+      "properties": {
+        "worktrees": {
+          "type": "string",
+          "description": "Where to create isolated worktrees",
+          "default": ".worktrees/"
+        },
+        "logs": {
+          "type": "string",
+          "description": "Where to store execution logs",
+          "default": ".founder-mode/logs/"
+        },
+        "prompts": {
+          "type": "string",
+          "description": "Where prompts live",
+          "default": "./prompts/"
+        },
+        "planning": {
+          "type": "string",
+          "description": "Where planning artifacts live",
+          "default": ".founder-mode/"
+        }
+      }
+    },
+    "execution": {
+      "type": "object",
+      "description": "Execution preferences",
+      "properties": {
+        "default_model": {
+          "type": "string",
+          "description": "Default model for run-prompt",
+          "enum": ["claude", "codex", "gemini", "zai", "opencode", "local"],
+          "default": "claude"
+        },
+        "parallel_limit": {
+          "type": "integer",
+          "description": "Maximum parallel agents",
+          "minimum": 1,
+          "maximum": 10,
+          "default": 3
+        },
+        "auto_commit": {
+          "type": "boolean",
+          "description": "Auto-commit after successful execution",
+          "default": false
+        },
+        "verify_after_execute": {
+          "type": "boolean",
+          "description": "Run verification after plan execution",
+          "default": true
+        }
+      }
+    },
+    "planning": {
+      "type": "object",
+      "description": "Planning preferences",
+      "properties": {
+        "depth": {
+          "type": "string",
+          "description": "Planning depth for new projects",
+          "enum": ["quick", "standard", "comprehensive"],
+          "default": "standard"
+        },
+        "research_enabled": {
+          "type": "boolean",
+          "description": "Enable research during new-project",
+          "default": true
+        },
+        "max_plans_per_phase": {
+          "type": "integer",
+          "description": "Maximum plans per phase before splitting",
+          "minimum": 1,
+          "maximum": 5,
+          "default": 3
+        }
+      }
+    },
+    "verification": {
+      "type": "object",
+      "description": "Verification settings",
+      "properties": {
+        "pre_execution": {
+          "type": "boolean",
+          "description": "Validate plans before execution",
+          "default": true
+        },
+        "post_execution": {
+          "type": "boolean",
+          "description": "Verify goals after execution",
+          "default": true
+        },
+        "max_retry_attempts": {
+          "type": "integer",
+          "description": "Maximum retry attempts on failure",
+          "minimum": 0,
+          "maximum": 5,
+          "default": 2
+        }
+      }
+    },
+    "display": {
+      "type": "object",
+      "description": "Display preferences",
+      "properties": {
+        "verbose": {
+          "type": "boolean",
+          "description": "Show detailed execution output",
+          "default": false
+        },
+        "progress_bar": {
+          "type": "boolean",
+          "description": "Show progress bar during execution",
+          "default": true
+        },
+        "timestamps": {
+          "type": "boolean",
+          "description": "Show timestamps in output",
+          "default": true
+        }
+      }
+    }
+  },
+  "example": {
+    "project": {
+      "name": "my-project"
+    },
+    "directories": {
+      "worktrees": "~/.worktrees/",
+      "logs": ".founder-mode/logs/",
+      "prompts": "./prompts/"
+    },
+    "execution": {
+      "default_model": "claude",
+      "parallel_limit": 3,
+      "auto_commit": false,
+      "verify_after_execute": true
+    },
+    "planning": {
+      "depth": "standard",
+      "research_enabled": true,
+      "max_plans_per_phase": 3
+    },
+    "verification": {
+      "pre_execution": true,
+      "post_execution": true,
+      "max_retry_attempts": 2
+    },
+    "display": {
+      "verbose": false,
+      "progress_bar": true,
+      "timestamps": true
+    }
+  }
+}

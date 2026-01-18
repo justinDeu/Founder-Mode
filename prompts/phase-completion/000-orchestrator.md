@@ -86,15 +86,15 @@ For each prompt:
 Track completion state in this file:
 
 ```
-[ ] 003-01-state-management.md
-[ ] 003-02-new-project.md
-[ ] 003-03-discuss-phase.md
-[ ] 003-04-plan-phase.md
-[ ] 003-06-verification-agents.md
-[ ] 003-05-execute-phase.md
-[ ] 004-01-github-integration.md
-[ ] 004-02-jira-integration.md
-[ ] 004-03-fix-gh-issue.md
+[x] 003-01-state-management.md
+[x] 003-02-new-project.md
+[x] 003-03-discuss-phase.md
+[x] 003-04-plan-phase.md
+[x] 003-06-verification-agents.md
+[x] 003-05-execute-phase.md
+[x] 004-01-github-integration.md
+[x] 004-02-jira-integration.md
+[x] 004-03-fix-gh-issue.md
 [ ] 005-01-parallel-execution.md
 [ ] 005-02-sprint-workflow.md
 ```

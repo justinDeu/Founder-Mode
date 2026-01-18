@@ -39,7 +39,7 @@ MODEL_CONFIG = {
         "env": {},
     },
     "opencode-zai": {
-        "command": ["opencode", "--model", "zai/glm-4.7", "run"],
+        "command": ["opencode", "--model", "zai-coding-plan/glm-4.7", "run"],
         "stdin_mode": "positional",
         "env": {},
     },
