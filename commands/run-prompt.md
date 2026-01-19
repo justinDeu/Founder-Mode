@@ -290,8 +290,7 @@ Build and execute command:
 python3 "$EXECUTOR" \
   --prompt "$prompt_file" \
   --cwd "$cwd" \
-  --model "$model" \
-  --run
+  --model "$model"
 ```
 
 If `--log` specified:
@@ -299,8 +298,7 @@ If `--log` specified:
 python3 "$EXECUTOR" \
   --prompt "$prompt_file" \
   --cwd "$cwd" \
-  --model "$model" \
-  --run 2>&1 | tee "$log"
+  --model "$model" 2>&1 | tee "$log"
 ```
 </executor_call>
 

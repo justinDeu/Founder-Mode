@@ -84,18 +84,20 @@ MODEL_CONFIG = {
         "env": {},
     },
     # OpenCode variants
+    # OpenCode writes logs to stderr by default. Use --print-logs to enable log output.
+    # The executor redirects stderr to stdout via stderr=subprocess.STDOUT.
     "opencode": {
-        "command": ["opencode", "run"],
+        "command": ["opencode", "--print-logs", "run"],
         "stdin_mode": "positional",
         "env": {},
     },
     "opencode-zai": {
-        "command": ["opencode", "--model", "zai-coding-plan/glm-4.7", "run"],
+        "command": ["opencode", "--print-logs", "--model", "zai-coding-plan/glm-4.7", "run"],
         "stdin_mode": "positional",
         "env": {},
     },
     "opencode-codex": {
-        "command": ["opencode", "--model", "openai/gpt-5.2-codex", "run"],
+        "command": ["opencode", "--print-logs", "--model", "openai/gpt-5.2-codex", "run"],
         "stdin_mode": "positional",
         "env": {},
     },

@@ -28,9 +28,19 @@ If you need bash or write access, you're the wrong agent for the job.
    - Completion indicators: "completed", "done", "finished", "exit code 0"
    - Error patterns: "error:", "fatal:", "failed", "ERR!", "exit code 1"
    - Progress indicators: timestamps, step counts, task names
+   - Model-specific patterns (see below)
 3. Report status changes to user
 4. Wait and check again (polling interval: 15-30 seconds)
 5. Repeat until completion detected or timeout reached
+
+## Model-Specific Patterns
+
+### OpenCode (opencode, opencode-zai, opencode-codex)
+OpenCode logs are now captured via `--print-logs` flag and written to the founder-mode log file. Look for:
+- Progress: "Working on", "Step", timestamps in format [HH:MM:SS]
+- Completion: "All tasks completed", final summaries, empty prompt response
+- Errors: "Error:", "Failed:", exception stack traces
+- Tool use: "Using tool", "Calling function", "Bash"
 
 ## Completion Detection
 
