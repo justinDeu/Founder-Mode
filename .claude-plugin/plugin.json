@@ -2,5 +2,7 @@
   "name": "founder-mode",
   "version": "0.1.0",
   "description": "AI-assisted development workflows with prompt execution, worktree isolation, and parallel task management",
-  "author": "thor"
+  "author": { 
+      "name": "thor"
+  }
 }
