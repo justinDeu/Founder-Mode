@@ -1,7 +1,7 @@
 ---
 name: founder-mode:run-prompt
 description: Execute a prompt with Claude or other AI models
-argument-hint: <prompt-file> [--model ?|claude|codex|gemini|...] [--background] [--worktree]
+argument-hint: <prompt-file> [--model ?|claude|codex|gemini|...] [--background] [--worktree] [--loop] [--two-stage]
 allowed-tools:
   - Read
   - Write
@@ -26,6 +26,42 @@ Execute a prompt file. Default: runs immediately in Claude with no menus, no con
 | `--cwd` | option | repo root | Working directory |
 | `--log` | option | auto | Log file path (non-Claude only) |
 | `--verbose` | flag | false | Show detailed execution metadata |
+| `--loop` | flag | false | Enable verification loop (non-Claude only) |
+| `--two-stage` | flag | false | Enable two-stage verification (requires --loop) |
+
+## Flags
+
+### --two-stage
+
+Enable two-stage verification (requires `--loop`):
+
+1. **Stage 1: Spec Compliance**
+   - Does output match requirements?
+   - Are all features implemented?
+   - Do tests pass?
+   - Marker: `SPEC_COMPLIANCE_VERIFIED`
+
+2. **Stage 2: Code Quality** (only runs if Stage 1 passes)
+   - Is code well-organized?
+   - Is error handling complete?
+   - Any obvious improvements?
+   - Marker: `QUALITY_VERIFIED`
+
+Use for complex prompts where both correctness and quality matter.
+
+Example:
+```bash
+/founder-mode:run-prompt my-feature --model codex --loop --two-stage
+```
+
+Result JSON includes:
+```json
+{
+  "status": "success",
+  "two_stage": true,
+  "stages_completed": ["spec", "quality"]
+}
+```
 
 ## Default Execution
 
