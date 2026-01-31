@@ -77,6 +77,26 @@ When implemented, this will auto-detect project type and run setup after worktre
 
 ## Available Commands
 
+### /fm:commit
+
+Create a git commit following the Conventional Commits specification.
+
+```
+/fm:commit [--amend] [--no-verify]
+```
+
+**Arguments:**
+- `--amend` - Amend the previous commit
+- `--no-verify` - Skip pre-commit hooks
+
+Analyzes staged changes to determine commit type (feat, fix, docs, etc.), writes a properly formatted message, and prompts for documentation updates when relevant.
+
+**Examples:**
+```
+/fm:commit
+/fm:commit --amend
+```
+
 ### /fm:run-prompt
 
 Execute a prompt with Claude or other AI models.
