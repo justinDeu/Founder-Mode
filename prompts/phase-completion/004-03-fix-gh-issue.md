@@ -353,11 +353,13 @@ When multiple issue numbers provided:
 /founder-mode:fix-gh-issue 123 456 789
 ```
 
-**For 2-3 related issues:**
-Fix sequentially in same branch, create single PR referencing all.
+**Default behavior (always):**
+Create separate worktree per issue, work in parallel, create separate PR per issue.
 
-**For 3+ unrelated issues:**
-Suggest using `/founder-mode:fix-issues` for parallel execution.
+Never combine issues into a single worktree or PR without explicit user confirmation.
+
+**For dependent issues:**
+Work in parallel worktrees. When the upstream issue completes, merge/rebase its branch into the dependent issue's worktree, then continue. Create separate PRs with dependency notes.
 
 ## Error Handling
 

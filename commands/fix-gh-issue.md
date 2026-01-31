@@ -234,7 +234,12 @@ Wait for completion and collect result.
 </single_issue>
 
 <multiple_issues>
-**Multiple issues → orchestrate**
+**Multiple issues → Always separate worktrees**
+
+<critical>
+Each issue ALWAYS gets its own worktree and its own PR by default.
+Never combine issues into a single worktree or PR without explicit user confirmation.
+</critical>
 
 Build comma-separated prompt list and invoke orchestrate:
 
@@ -250,7 +255,7 @@ Skill(
 ```
 
 The orchestrate command handles:
-- Wave calculation (all prompts in single wave since no dependencies)
+- One worktree per issue (always isolated)
 - Parallel execution for non-Claude models
 - Spawning `readonly-log-watcher` monitors for background executions
 - Progress reporting per wave
@@ -263,6 +268,21 @@ The orchestrate command handles:
 - User sees wave completion reports
 
 Wait for orchestration to complete and collect all results.
+
+**Dependent issues workflow:**
+
+When issues have dependencies (e.g., issue B requires changes from issue A):
+1. Work proceeds in parallel worktrees
+2. After issue A completes, merge or rebase its branch into issue B's worktree
+3. Continue with issue B's work
+4. Create separate PRs, with B's PR noting it depends on A's
+
+```bash
+# In issue B's worktree, after A completes:
+git fetch origin
+git merge origin/gh-{A-number}-{slug}  # or git rebase
+# Continue with B's implementation
+```
 </multiple_issues>
 
 ### Step 5: Collect Results
@@ -425,11 +445,17 @@ Manual creation:
 ```
 → Asks for model, generates prompt, runs via run-prompt, creates PR
 
-**Fix multiple issues:**
+**Fix multiple issues (always separate worktrees):**
 ```
 /founder-mode:fix-gh-issue 123 456 789
 ```
-→ Generates 3 prompts, runs via orchestrate (parallel if non-Claude), creates 3 PRs
+→ Creates 3 separate worktrees, generates 3 prompts, runs via orchestrate, creates 3 separate PRs
+
+**Fix dependent issues:**
+```
+/founder-mode:fix-gh-issue 100 101  # where 101 depends on 100
+```
+→ Creates separate worktrees, works in parallel, merges 100 into 101's worktree when ready, creates 2 PRs
 
 **Fix with specific model:**
 ```
