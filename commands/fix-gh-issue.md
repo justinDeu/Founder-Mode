@@ -252,7 +252,7 @@ Invoke run-prompt skill with generated prompt:
 
 ```
 Skill(
-  skill: "run-prompt",
+  skill: "founder-mode:run-prompt",
   args: "{prompt_file} --model {selected_model} {--worktree unless --no-worktree}"
 )
 ```
@@ -281,7 +281,7 @@ PROMPT_LIST=$(ls .founder-mode/prompts/gh-issues/gh-*.md | tr '\n' ',' | sed 's/
 
 ```
 Skill(
-  skill: "orchestrate",
+  skill: "founder-mode:orchestrate",
   args: "{prompt_list} --model {selected_model} {--worktree unless --no-worktree}"
 )
 ```
