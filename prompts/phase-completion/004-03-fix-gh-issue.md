@@ -353,16 +353,20 @@ When multiple issue numbers provided:
 /founder-mode:fix-gh-issue 123 456 789
 ```
 
-**Default behavior (always):**
+**Step 1: Dependency Analysis (before execution)**
+Ask user if issues are dependent on each other. Dependency means conceptually related (one issue's solution requires another's changes). File overlap from parallel development is NOT a dependency.
+
+**Default behavior (independent issues):**
 Create separate worktree per issue, work in parallel, create separate PR per issue.
 
 Never combine issues into a single worktree or PR without explicit user confirmation.
 
-**For dependent issues:**
-Work in parallel worktrees with intelligent merge timing:
+**For dependent issues (user-confirmed):**
+After user confirms dependency and approves execution plan:
+- Work in parallel worktrees with intelligent merge timing
 - Monitor upstream issue for merge-ready state (substantive commits, tests passing)
-- Merge into downstream worktree when upstream reaches a stable point, not necessarily full completion
-- Downstream agent restarts with updated context after merge, re-reading affected files
+- Merge into downstream worktree when upstream reaches a stable point
+- Downstream agent restarts with updated context after merge
 - If conflicts occur, pause and surface to user
 - Create separate PRs with dependency notes
 

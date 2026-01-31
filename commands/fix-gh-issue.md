@@ -42,7 +42,15 @@ This command composes first-principle commands:
          │
          ▼
 ┌─────────────────────────────────────────────────────────┐
-│  Step 2: Generate Prompts (inline)                      │
+│  Step 2: Dependency Analysis (multiple issues only)     │
+│  Present issues to user, ask about dependencies         │
+│  User confirms: independent OR specifies dependency     │
+│  User approves execution plan                           │
+└─────────────────────────────────────────────────────────┘
+         │
+         ▼
+┌─────────────────────────────────────────────────────────┐
+│  Step 3: Generate Prompts (inline)                      │
 │  Create prompt files in .founder-mode/prompts/gh-issues │
 │  → gh-123-{slug}.md                                     │
 │  → gh-456-{slug}.md                                     │
@@ -50,13 +58,13 @@ This command composes first-principle commands:
          │
          ▼
 ┌─────────────────────────────────────────────────────────┐
-│  Step 3: Model Selection (MANDATORY)                    │
+│  Step 4: Model Selection (MANDATORY)                    │
 │  AskUserQuestion: "Which model for execution?"          │
 └─────────────────────────────────────────────────────────┘
          │
          ▼
 ┌─────────────────────────────────────────────────────────┐
-│  Step 4: Execute via Orchestration                      │
+│  Step 5: Execute via Orchestration                      │
 │                                                         │
 │  Single issue:                                          │
 │    Skill(skill: "run-prompt", args: "... --worktree")   │
@@ -67,7 +75,7 @@ This command composes first-principle commands:
          │
          ▼
 ┌─────────────────────────────────────────────────────────┐
-│  Step 5: Create PRs (gh CLI)                            │
+│  Step 6: Create PRs (gh CLI)                            │
 │  For each completed worktree:                           │
 │    git push -u origin {branch}                          │
 │    gh pr create --title "Fix: {issue title}"            │
@@ -104,7 +112,70 @@ URL: {url}
 
 Store parsed issues in memory for prompt generation.
 
-### Step 2: Generate Prompts
+### Step 2: Dependency Analysis (multiple issues only)
+
+Skip this step for single issues.
+
+For multiple issues, present the issues to the user and ask about dependencies:
+
+```
+AskUserQuestion(
+  questions: [{
+    question: "Are any of these issues dependent on each other?",
+    header: "Dependencies",
+    options: [
+      { label: "Independent", description: "Work in parallel, separate PRs (Recommended)" },
+      { label: "Dependent", description: "One issue requires another's changes first" }
+    ]
+  }]
+)
+```
+
+**If user selects "Independent":**
+- Proceed with parallel execution in separate worktrees
+- Each issue gets its own PR
+
+**If user selects "Dependent":**
+Ask follow-up to identify the dependency:
+
+```
+AskUserQuestion(
+  questions: [{
+    question: "Which issue must complete first?",
+    header: "Upstream",
+    options: [
+      { label: "#{A}: {title_A}", description: "This issue provides changes needed by the other" },
+      { label: "#{B}: {title_B}", description: "This issue provides changes needed by the other" }
+    ]
+  }]
+)
+```
+
+Then present the execution plan for approval:
+
+```
+Execution Plan
+==============
+
+Issue #{A}: {title_A}
+  → Worktree: gh-{A}-{slug_A}
+  → Executes first (upstream)
+
+Issue #{B}: {title_B}
+  → Worktree: gh-{B}-{slug_B}
+  → Starts in parallel, merges #{A} when ready
+  → Merge triggers: #{A} has substantive commits + tests passing
+
+Proceed with this plan? (Confirmation required)
+```
+
+<important>
+Dependency means the issues are conceptually related: one issue's solution requires or builds upon another's changes.
+
+Dependency does NOT mean issues happen to touch the same files. File overlap from parallel development is not a dependency. That's just a merge conflict to resolve later if it occurs.
+</important>
+
+### Step 3: Generate Prompts
 
 For each issue, generate a prompt file. Do NOT call `/fm:create-prompt` (too heavyweight for issue context). Generate inline using this template:
 
@@ -183,7 +254,7 @@ Generated Prompts
 Saved to: .founder-mode/prompts/gh-issues/
 ```
 
-### Step 3: Model Selection (MANDATORY)
+### Step 4: Model Selection (MANDATORY)
 
 <critical>
 ALWAYS ask the user to select a model before execution. This step is MANDATORY.
@@ -209,7 +280,7 @@ AskUserQuestion(
 
 Wait for user selection before proceeding.
 
-### Step 4: Execute via Orchestration
+### Step 5: Execute via Orchestration
 
 Route based on issue count:
 
@@ -271,9 +342,15 @@ Wait for orchestration to complete and collect all results.
 
 **Dependent issues workflow:**
 
-When issues have dependencies (e.g., issue B requires changes from issue A):
+<important>
+Dependencies are identified by the user in Step 2, not auto-detected.
 
-1. **Detection:** During prompt generation, analyze if issues share affected files or components
+A dependency means issues are conceptually related: one issue's solution requires or builds upon another's changes. File overlap from parallel development is NOT a dependency.
+</important>
+
+When user confirms issues have dependencies (e.g., issue B requires changes from issue A):
+
+1. **User confirmation:** User identified the dependency in Step 2 and approved the execution plan
 2. **Parallel start:** Both issues begin in separate worktrees simultaneously
 3. **Merge timing:** Monitor upstream issue (A) for merge-ready state:
    - Core implementation committed (not just scaffolding)
@@ -316,7 +393,7 @@ git merge gh-{A-number}-{slug}  # or git rebase
 Note: Since worktrees share the same repository, local branches are directly accessible without fetching from origin.
 </multiple_issues>
 
-### Step 5: Collect Results
+### Step 6: Collect Results
 
 After execution completes, collect results from each issue's worktree:
 
@@ -352,7 +429,7 @@ If any failed, offer retry:
 3. Abort
 ```
 
-### Step 6: Create PRs (unless --no-pr)
+### Step 7: Create PRs (unless --no-pr)
 
 For each successful issue worktree:
 
@@ -387,7 +464,7 @@ EOF
 
 Capture PR URL for each issue.
 
-### Step 7: Report Completion
+### Step 8: Report Completion
 
 ```
 GitHub Issues Fixed
