@@ -272,17 +272,48 @@ Wait for orchestration to complete and collect all results.
 **Dependent issues workflow:**
 
 When issues have dependencies (e.g., issue B requires changes from issue A):
-1. Work proceeds in parallel worktrees
-2. After issue A completes, merge or rebase its branch into issue B's worktree
-3. Continue with issue B's work
-4. Create separate PRs, with B's PR noting it depends on A's
+
+1. **Detection:** During prompt generation, analyze if issues share affected files or components
+2. **Parallel start:** Both issues begin in separate worktrees simultaneously
+3. **Merge timing:** Monitor upstream issue (A) for merge-ready state:
+   - Core implementation committed (not just scaffolding)
+   - Tests passing for the implemented portion
+   - No uncommitted changes blocking the merge
+4. **Merge and continue:** When A reaches merge-ready state, merge into B's worktree and resume B's agent
+5. **Separate PRs:** Create PRs with dependency notes
+
+**Merge-ready detection:**
+
+The orchestrator monitors each issue's worktree for merge-ready signals:
+```bash
+# Check if issue A has substantive commits beyond initial setup
+COMMITS=$(git -C "$WORKTREE_A" log --oneline main..HEAD | wc -l)
+TESTS_PASS=$(git -C "$WORKTREE_A" diff --quiet && run_tests_in_worktree "$WORKTREE_A")
+
+if [ "$COMMITS" -gt 0 ] && [ "$TESTS_PASS" = "true" ]; then
+  # A is merge-ready, trigger merge into B
+  git -C "$WORKTREE_B" merge gh-{A-number}-{slug}
+fi
+```
+
+**Sub-agent coordination:**
+
+For dependent issues with sub-agents:
+1. **Decompose prompts:** Split each issue into phases if needed (setup, core impl, integration)
+2. **Phase-based merging:** Merge after upstream completes a phase, not necessarily the entire issue
+3. **Agent restart:** After merge, the downstream agent may need to restart with updated context:
+   - Re-read affected files to see upstream changes
+   - Adjust implementation approach if upstream introduced different patterns
+   - Continue from where it left off, not from scratch
+4. **Conflict handling:** If merge conflicts occur, pause downstream agent and surface to user
 
 ```bash
-# In issue B's worktree, after A completes:
-git fetch origin
-git merge origin/gh-{A-number}-{slug}  # or git rebase
+# In issue B's worktree, after A reaches merge-ready:
+git merge gh-{A-number}-{slug}  # or git rebase
 # Continue with B's implementation
 ```
+
+Note: Since worktrees share the same repository, local branches are directly accessible without fetching from origin.
 </multiple_issues>
 
 ### Step 5: Collect Results

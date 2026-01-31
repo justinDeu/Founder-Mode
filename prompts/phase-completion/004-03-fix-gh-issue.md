@@ -359,7 +359,12 @@ Create separate worktree per issue, work in parallel, create separate PR per iss
 Never combine issues into a single worktree or PR without explicit user confirmation.
 
 **For dependent issues:**
-Work in parallel worktrees. When the upstream issue completes, merge/rebase its branch into the dependent issue's worktree, then continue. Create separate PRs with dependency notes.
+Work in parallel worktrees with intelligent merge timing:
+- Monitor upstream issue for merge-ready state (substantive commits, tests passing)
+- Merge into downstream worktree when upstream reaches a stable point, not necessarily full completion
+- Downstream agent restarts with updated context after merge, re-reading affected files
+- If conflicts occur, pause and surface to user
+- Create separate PRs with dependency notes
 
 ## Error Handling
 
