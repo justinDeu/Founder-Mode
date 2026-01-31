@@ -354,15 +354,17 @@ When multiple issue numbers provided:
 ```
 
 **Step 1: Dependency Analysis (before execution)**
-Ask user if issues are dependent on each other. Dependency means conceptually related (one issue's solution requires another's changes). File overlap from parallel development is NOT a dependency.
+Analyze issues to determine conceptual dependencies. Dependency means one issue's solution requires or builds upon another's changes. File overlap from parallel development is NOT a dependency.
+
+Present analysis and proposed execution plan to user for verification. User can confirm, mark as independent, or reverse the dependency direction.
 
 **Default behavior (independent issues):**
 Create separate worktree per issue, work in parallel, create separate PR per issue.
 
 Never combine issues into a single worktree or PR without explicit user confirmation.
 
-**For dependent issues (user-confirmed):**
-After user confirms dependency and approves execution plan:
+**For dependent issues (analysis verified by user):**
+After user verifies dependency analysis and execution plan:
 - Work in parallel worktrees with intelligent merge timing
 - Monitor upstream issue for merge-ready state (substantive commits, tests passing)
 - Merge into downstream worktree when upstream reaches a stable point

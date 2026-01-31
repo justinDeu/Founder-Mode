@@ -43,9 +43,9 @@ This command composes first-principle commands:
          ▼
 ┌─────────────────────────────────────────────────────────┐
 │  Step 2: Dependency Analysis (multiple issues only)     │
-│  Present issues to user, ask about dependencies         │
-│  User confirms: independent OR specifies dependency     │
-│  User approves execution plan                           │
+│  Analyze issues to determine conceptual dependencies    │
+│  Present analysis + execution plan to user              │
+│  User verifies or adjusts the analysis                  │
 └─────────────────────────────────────────────────────────┘
          │
          ▼
@@ -116,64 +116,81 @@ Store parsed issues in memory for prompt generation.
 
 Skip this step for single issues.
 
-For multiple issues, present the issues to the user and ask about dependencies:
+**Analyze the issues to determine dependencies:**
 
-```
-AskUserQuestion(
-  questions: [{
-    question: "Are any of these issues dependent on each other?",
-    header: "Dependencies",
-    options: [
-      { label: "Independent", description: "Work in parallel, separate PRs (Recommended)" },
-      { label: "Dependent", description: "One issue requires another's changes first" }
-    ]
-  }]
-)
-```
-
-**If user selects "Independent":**
-- Proceed with parallel execution in separate worktrees
-- Each issue gets its own PR
-
-**If user selects "Dependent":**
-Ask follow-up to identify the dependency:
-
-```
-AskUserQuestion(
-  questions: [{
-    question: "Which issue must complete first?",
-    header: "Upstream",
-    options: [
-      { label: "#{A}: {title_A}", description: "This issue provides changes needed by the other" },
-      { label: "#{B}: {title_B}", description: "This issue provides changes needed by the other" }
-    ]
-  }]
-)
-```
-
-Then present the execution plan for approval:
-
-```
-Execution Plan
-==============
-
-Issue #{A}: {title_A}
-  → Worktree: gh-{A}-{slug_A}
-  → Executes first (upstream)
-
-Issue #{B}: {title_B}
-  → Worktree: gh-{B}-{slug_B}
-  → Starts in parallel, merges #{A} when ready
-  → Merge triggers: #{A} has substantive commits + tests passing
-
-Proceed with this plan? (Confirmation required)
-```
+Read each issue's title, body, and scope of work. Determine if any issue conceptually depends on another:
+- Does issue B's solution require changes that issue A would introduce?
+- Does issue B build upon functionality that issue A creates?
+- Is there a logical ordering where one must come before the other?
 
 <important>
-Dependency means the issues are conceptually related: one issue's solution requires or builds upon another's changes.
+Dependency means conceptual relationship: one issue's solution requires or builds upon another's changes.
 
 Dependency does NOT mean issues happen to touch the same files. File overlap from parallel development is not a dependency. That's just a merge conflict to resolve later if it occurs.
 </important>
+
+**If no dependencies found:**
+
+Present analysis and proceed:
+
+```
+Dependency Analysis
+===================
+
+Issue #123: {title}
+Issue #456: {title}
+
+Analysis: These issues are independent. They address separate concerns
+and neither requires changes from the other.
+
+Execution Plan: Parallel worktrees, separate PRs.
+```
+
+**If dependencies found:**
+
+Present the analysis and proposed execution plan for user verification:
+
+```
+Dependency Analysis
+===================
+
+Issue #123: {title}
+Issue #456: {title}
+
+Analysis: Issue #456 depends on #123.
+Reason: {explain why - e.g., "#456 adds validation to the auth flow that #123 creates"}
+
+Proposed Execution Plan:
+
+Phase 1: Issue #123 (upstream)
+  → Worktree: gh-123-{slug}
+  → Creates the foundation needed by #456
+
+Phase 2: Issue #456 (downstream)
+  → Worktree: gh-456-{slug}
+  → Starts in parallel, merges #123 when ready
+  → Merge trigger: #123 has substantive commits + tests passing
+
+Separate PRs will be created for each issue.
+```
+
+Then ask user to verify:
+
+```
+AskUserQuestion(
+  questions: [{
+    question: "Does this dependency analysis look correct?",
+    header: "Verify",
+    options: [
+      { label: "Correct", description: "Proceed with this execution plan" },
+      { label: "Actually independent", description: "No dependency, run fully in parallel" },
+      { label: "Reverse dependency", description: "The other issue should be upstream" }
+    ]
+  }]
+)
+```
+
+Adjust execution plan based on user feedback.
 
 ### Step 3: Generate Prompts
 
@@ -343,14 +360,14 @@ Wait for orchestration to complete and collect all results.
 **Dependent issues workflow:**
 
 <important>
-Dependencies are identified by the user in Step 2, not auto-detected.
+Dependencies are determined by analyzing the issues in Step 2, then verified by the user.
 
 A dependency means issues are conceptually related: one issue's solution requires or builds upon another's changes. File overlap from parallel development is NOT a dependency.
 </important>
 
-When user confirms issues have dependencies (e.g., issue B requires changes from issue A):
+When analysis determines issues have dependencies (e.g., issue B requires changes from issue A):
 
-1. **User confirmation:** User identified the dependency in Step 2 and approved the execution plan
+1. **Analysis verified:** Dependency analysis presented in Step 2, user verified the execution plan
 2. **Parallel start:** Both issues begin in separate worktrees simultaneously
 3. **Merge timing:** Monitor upstream issue (A) for merge-ready state:
    - Core implementation committed (not just scaffolding)
