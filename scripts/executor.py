@@ -10,6 +10,15 @@ import sys
 import time
 from pathlib import Path
 
+from state import (
+    load_state,
+    save_state,
+    create_state,
+    update_iteration,
+    extract_next_steps,
+    get_state_file,
+)
+
 
 # Z.AI Provider Documentation
 # ============================
@@ -156,8 +165,21 @@ def get_model_command(model: str, prompt: str) -> tuple[list[str], str | None, b
 VERIFICATION_PATTERN = re.compile(r"<verification>(.*?)</verification>", re.DOTALL)
 
 
+def get_iteration_log_path(base_dir: Path, prompt_id: str, iteration: int, timestamp: str) -> Path:
+    """Generate log path for a specific iteration."""
+    return base_dir / f"{prompt_id}-iter{iteration}-{timestamp}.log"
+
+
+def get_loop_log_path(base_dir: Path, prompt_id: str, timestamp: str) -> Path:
+    """Generate aggregate loop log path."""
+    return base_dir / f"{prompt_id}-loop-{timestamp}.log"
+
+
 def run_cli(model: str, prompt: str, cwd: str, log_path: Path) -> bool:
     """Run the CLI for the given model (blocking). Returns True on success."""
+    # Ensure log directory exists
+    log_path.parent.mkdir(parents=True, exist_ok=True)
+
     cmd, stdin_data, uses_stdin, env_vars = get_model_command(model, prompt)
 
     # Merge environment variables with current environment
@@ -275,21 +297,24 @@ def main():
 
     prompt_path = Path(args.prompt)
     cwd = args.cwd
+    prompt_id = prompt_path.stem
 
-    # Auto-generate log path if not provided
+    # Generate timestamp once at start for consistent log naming
+    execution_timestamp = time.strftime('%Y%m%d-%H%M%S')
+    log_dir = Path(cwd) / ".founder-mode" / "logs"
+    log_dir.mkdir(parents=True, exist_ok=True)
+
+    # Determine log path for non-loop mode or explicit --log
     if args.log:
         log_path = Path(args.log)
     else:
-        timestamp = time.strftime('%Y%m%d-%H%M%S')
-        prompt_basename = prompt_path.stem
-        log_path = Path(cwd) / ".founder-mode" / "logs" / f"{prompt_basename}_{timestamp}.log"
+        log_path = log_dir / f"{prompt_id}_{execution_timestamp}.log"
 
     if not prompt_path.exists():
         print(json.dumps({"status": "error", "message": f"Prompt file not found: {args.prompt}"}))
         sys.exit(1)
 
     original_prompt = prompt_path.read_text()
-    log_path.parent.mkdir(parents=True, exist_ok=True)
 
     # Background execution: spawn and return immediately
     if args.background:
@@ -303,17 +328,62 @@ def main():
         print(json.dumps(result))
         sys.exit(0)
 
+    # Initialize loop logging if enabled
+    loop_log_path = None
+    iteration_logs = []
+
+    if args.loop:
+        loop_log_path = get_loop_log_path(log_dir, prompt_id, execution_timestamp)
+        with open(loop_log_path, "w") as f:
+            f.write(f"=== Loop started at {time.strftime('%Y-%m-%d %H:%M:%S')} ===\n")
+            f.write(f"Prompt: {prompt_id}\n")
+            f.write(f"Model: {args.model}\n")
+            f.write(f"Max iterations: {args.max_iterations}\n\n")
+
+    # Initialize state for persistence (loop mode only)
+    state = None
+    if args.loop:
+        existing_state = load_state(cwd, prompt_id)
+        if existing_state and existing_state.get("status") == "running":
+            state = existing_state
+            print(f"Resuming from iteration {state['iteration']}", file=sys.stderr)
+        else:
+            state = create_state(
+                prompt_id, args.model, args.max_iterations,
+                str(loop_log_path.absolute()), cwd
+            )
+        state["status"] = "running"
+        save_state(state)
+
     # Foreground execution with optional verification loop
-    iterations = 0
+    iterations = state["iteration"] if state else 0
     status = "unknown"
     current_prompt = original_prompt
 
     while iterations < args.max_iterations:
         iterations += 1
 
-        success = run_cli(args.model, current_prompt, cwd, log_path)
+        # Determine log path for this iteration
+        if args.loop:
+            iteration_log_path = get_iteration_log_path(log_dir, prompt_id, iterations, execution_timestamp)
+            iteration_logs.append(str(iteration_log_path.absolute()))
+        else:
+            iteration_log_path = log_path
+
+        success = run_cli(args.model, current_prompt, cwd, iteration_log_path)
+
+        # Append summary to loop log
+        if args.loop:
+            with open(loop_log_path, "a") as f:
+                f.write(f"--- Iteration {iterations} ---\n")
+                f.write(f"Log: {iteration_log_path}\n")
+                f.write(f"Status: {'success' if success else 'cli_error'}\n\n")
 
         if not success:
+            # Update state on CLI error
+            if state:
+                update_iteration(state, 1, False, "CLI returned non-zero exit code")
+                save_state(state)
             status = "cli_error"
             break
 
@@ -321,14 +391,34 @@ def main():
             status = "success"
             break
 
-        verification_status, reason = check_verification(log_path)
+        verification_status, reason = check_verification(iteration_log_path)
+
+        # Update loop log with verification result
+        with open(loop_log_path, "a") as f:
+            f.write(f"Verification: {verification_status}\n")
+            if reason:
+                f.write(f"Reason: {reason}\n")
+            f.write("\n")
+
+        # Update state with iteration results
+        if state:
+            marker_found = verification_status == "complete"
+            update_iteration(state, 0, marker_found, reason)
+
+            # Extract next steps from iteration log
+            log_content = iteration_log_path.read_text()
+            next_steps = extract_next_steps(log_content)
+            if next_steps:
+                state["suggested_next_steps"] = next_steps
+
+            save_state(state)
 
         if verification_status == "complete":
             status = "success"
             break
 
         if verification_status == "retry" and iterations < args.max_iterations:
-            current_prompt = build_retry_prompt(original_prompt, log_path, reason)
+            current_prompt = build_retry_prompt(original_prompt, iteration_log_path, reason)
             status = "retrying"
             continue
 
@@ -339,11 +429,31 @@ def main():
         status = f"verification_failed:{verification_status}"
         break
 
+    # Finalize loop log
+    if args.loop:
+        with open(loop_log_path, "a") as f:
+            f.write(f"=== Loop finished at {time.strftime('%Y-%m-%d %H:%M:%S')} ===\n")
+            f.write(f"Final status: {status}\n")
+            f.write(f"Total iterations: {iterations}\n")
+
+    # Update final state
+    if state:
+        state["status"] = status
+        save_state(state)
+
+    # Build result JSON
     result = {
         "status": status,
         "iterations": iterations,
-        "log_path": str(log_path.absolute()),
     }
+
+    if args.loop:
+        result["loop_log"] = str(loop_log_path.absolute())
+        result["iteration_logs"] = iteration_logs
+        result["log_path"] = str(loop_log_path.absolute())  # Primary log is the loop log
+        result["state_file"] = str(get_state_file(cwd, prompt_id).absolute())
+    else:
+        result["log_path"] = str(log_path.absolute())
 
     print(json.dumps(result))
     sys.exit(0 if status == "success" else 1)
