@@ -167,10 +167,46 @@ Prompts: {list of prompt IDs in this wave}
 
 **4b. Spawn Task agents for all prompts in wave (PARALLEL):**
 
-For Claude models, spawn directly as Task subagents.
-For non-Claude models, spawn Tasks that call run-prompt.
+Route through run-prompt when `--worktree` is specified (ensures worktree creation for all models).
+For Claude models without `--worktree`, spawn directly as Task subagents.
+For non-Claude models, always spawn Tasks that call run-prompt.
 
 CRITICAL: Spawn ALL tasks for the wave in a SINGLE message with multiple Task tool calls.
+
+<spawn_with_worktree>
+**If `--worktree` flag is set (any model):**
+
+All prompts route through run-prompt to leverage its worktree creation logic:
+
+```
+# For each prompt in wave, spawn in parallel:
+Task(
+  subagent_type: "general-purpose",
+  run_in_background: true,  # if --background
+  prompt: """
+Execute prompt via run-prompt: {prompt_id} - {title}
+
+Call:
+/fm:run-prompt {prompt_path} --model {model} --worktree {--background}
+
+Write results to .founder-mode/logs/{prompt_id}-result.json:
+{
+  "prompt_id": "{prompt_id}",
+  "status": "success|failed",
+  "summary": "what was accomplished",
+  "files_changed": ["list", "of", "files"],
+  "errors": []
+}
+"""
+)
+```
+</spawn_with_worktree>
+
+<spawn_without_worktree>
+**If no `--worktree` flag:**
+
+For Claude models, spawn directly as Task subagents.
+For non-Claude models, spawn Tasks that call run-prompt.
 
 ```
 # For each prompt in wave, spawn in parallel:
@@ -188,7 +224,7 @@ Working directory: {cwd}
 Model: {selected_model}
 
 If non-Claude model, call:
-/fm:run-prompt {prompt_path} --model {model} {--background} {--worktree}
+/fm:run-prompt {prompt_path} --model {model} {--background}
 
 Execute completely. Write results to .founder-mode/logs/{prompt_id}-result.json:
 {
@@ -201,6 +237,7 @@ Execute completely. Write results to .founder-mode/logs/{prompt_id}-result.json:
 """
 )
 ```
+</spawn_without_worktree>
 
 **4c. If --background with non-Claude, spawn monitors:**
 
