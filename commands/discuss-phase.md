@@ -1,5 +1,5 @@
 ---
-name: founder-mode:discuss-phase
+name: fm:discuss-phase
 description: Capture user vision and decisions before planning begins, preventing Claude from making assumptions
 argument-hint: [N] [--refresh]
 allowed-tools:
@@ -104,7 +104,7 @@ AskUserQuestion:
 If "Keep current context", exit with:
 ```
 Using existing context: {context_file}
-Run /founder-mode:plan-phase {N} to continue.
+Run /fm:plan-phase {N} to continue.
 ```
 
 If "Review and update", load existing decisions to present during gray area discussion.
@@ -590,7 +590,7 @@ Claude's discretion: {count} areas
 Deferred ideas: {count} items
 
 Next step:
-  /founder-mode:plan-phase {N}
+  /fm:plan-phase {N}
 ```
 </completion_message>
 
@@ -603,7 +603,7 @@ If .founder-mode/PROJECT.md doesn't exist:
 ```
 No project found.
 
-Run /founder-mode:new-project first to initialize.
+Run /fm:new-project first to initialize.
 ```
 </error_no_project>
 
@@ -612,7 +612,7 @@ If .founder-mode/ROADMAP.md doesn't exist:
 ```
 No roadmap found.
 
-Run /founder-mode:new-project to create roadmap.
+Run /fm:new-project to create roadmap.
 ```
 </error_no_roadmap>
 
@@ -624,7 +624,7 @@ Phase {N} not found in ROADMAP.md.
 Available phases:
 {list phases from ROADMAP.md}
 
-Use: /founder-mode:discuss-phase {valid_phase_number}
+Use: /fm:discuss-phase {valid_phase_number}
 ```
 </error_phase_not_found>
 
@@ -634,7 +634,7 @@ If phase is already marked complete:
 Phase {N} is already complete.
 
 To re-discuss for iteration:
-  /founder-mode:discuss-phase {N} --refresh
+  /fm:discuss-phase {N} --refresh
 ```
 </error_phase_complete>
 
@@ -644,17 +644,17 @@ To re-discuss for iteration:
 
 **Discuss current phase:**
 ```
-/founder-mode:discuss-phase
+/fm:discuss-phase
 ```
 
 **Discuss specific phase:**
 ```
-/founder-mode:discuss-phase 3
+/fm:discuss-phase 3
 ```
 
 **Re-discuss with existing context:**
 ```
-/founder-mode:discuss-phase 2 --refresh
+/fm:discuss-phase 2 --refresh
 ```
 
 ---

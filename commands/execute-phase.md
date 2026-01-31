@@ -1,5 +1,5 @@
 ---
-name: founder-mode:execute-phase
+name: fm:execute-phase
 description: Execute all plans in a phase with wave-based parallelization
 argument-hint: "[N] [--gaps-only]"
 allowed-tools:
@@ -41,13 +41,13 @@ Check that required project files exist and phase is valid:
 ```bash
 # Check for project
 if [ ! -d ".founder-mode" ]; then
-    echo "No project found. Run /founder-mode:new-project first."
+    echo "No project found. Run /fm:new-project first."
     exit 1
 fi
 
 # Check for STATE.md
 if [ ! -f ".founder-mode/STATE.md" ]; then
-    echo "No state found. Run /founder-mode:new-project first."
+    echo "No state found. Run /fm:new-project first."
     exit 1
 fi
 
@@ -95,7 +95,7 @@ PLANS=$(ls ${PHASE_DIR}/*-PLAN.md 2>/dev/null)
 if [ -z "$PLANS" ]; then
     echo "No plans found in ${PHASE_DIR}"
     echo ""
-    echo "Run /founder-mode:plan-phase ${N} first."
+    echo "Run /fm:plan-phase ${N} first."
     exit 1
 fi
 
@@ -125,7 +125,7 @@ fi
 if [ ${#PENDING_PLANS[@]} -eq 0 ]; then
     echo ""
     echo "No incomplete plans. Phase may already be complete."
-    echo "Run /founder-mode:execute-phase ${N} --force to re-execute."
+    echo "Run /fm:execute-phase ${N} --force to re-execute."
     exit 0
 fi
 ```
@@ -464,7 +464,7 @@ What's Missing:
    - Artifacts: {files with issues}
    - Missing: {what needs to be added}
 
-Next step: /founder-mode:plan-phase {N} --gaps
+Next step: /fm:plan-phase {N} --gaps
 ```
 
 **If human_needed:**
@@ -584,11 +584,11 @@ Next Up
 
 Phase {N+1}: {Name} - {Goal from ROADMAP.md}
 
-/founder-mode:discuss-phase {N+1} - gather context and clarify approach
+/fm:discuss-phase {N+1} - gather context and clarify approach
 
 Also available:
-- /founder-mode:plan-phase {N+1} - skip discussion, plan directly
-- /founder-mode:verify-work {N} - manual acceptance testing before continuing
+- /fm:plan-phase {N+1} - skip discussion, plan directly
+- /fm:verify-work {N} - manual acceptance testing before continuing
 ```
 
 **Route B: Last phase complete (status: passed)**
@@ -607,11 +607,11 @@ Next Up
 
 Audit milestone - verify requirements, cross-phase integration, E2E flows
 
-/founder-mode:audit-milestone
+/fm:audit-milestone
 
 Also available:
-- /founder-mode:verify-work - manual acceptance testing
-- /founder-mode:complete-milestone - skip audit, archive directly
+- /fm:verify-work - manual acceptance testing
+- /fm:complete-milestone - skip audit, archive directly
 ```
 
 **Route C: Gaps found (status: gaps_found)**
@@ -635,19 +635,19 @@ Next Up
 
 Plan gap closure - create additional plans to complete the phase
 
-/founder-mode:plan-phase {N} --gaps
+/fm:plan-phase {N} --gaps
 
 Also available:
 - cat {PHASE_DIR}/{PHASE}-VERIFICATION.md - see full report
-- /founder-mode:verify-work {N} - manual testing before planning
+- /fm:verify-work {N} - manual testing before planning
 ```
 
 **Gap closure loop:**
 
-After user runs `/founder-mode:plan-phase {N} --gaps`:
+After user runs `/fm:plan-phase {N} --gaps`:
 1. Planner reads VERIFICATION.md gaps
 2. Creates additional plans (04, 05, etc.) to close gaps
-3. User runs `/founder-mode:execute-phase {N}` again
+3. User runs `/fm:execute-phase {N}` again
 4. Execute-phase runs only incomplete plans (04, 05...)
 5. Verifier runs again
 6. Loop until passed
@@ -925,7 +925,7 @@ If .founder-mode/ doesn't exist:
 ```
 No project found.
 
-Run /founder-mode:new-project first to initialize.
+Run /fm:new-project first to initialize.
 ```
 </error_no_project>
 
@@ -935,7 +935,7 @@ If no PLAN.md files in phase directory:
 ```
 No plans found for Phase {N}.
 
-Run /founder-mode:plan-phase {N} first to create plans.
+Run /fm:plan-phase {N} first to create plans.
 ```
 </error_no_plans>
 
@@ -948,7 +948,7 @@ Phase {N} not found.
 Available phases:
 {list phases from .founder-mode/plans/}
 
-Use: /founder-mode:execute-phase {valid_phase_number}
+Use: /fm:execute-phase {valid_phase_number}
 ```
 </error_phase_not_found>
 
@@ -967,7 +967,7 @@ Options:
 2. Skip and continue with wave
 3. Abort phase execution
 
-Retry with: /founder-mode:execute-phase {N}
+Retry with: /fm:execute-phase {N}
 (Will only run incomplete plans)
 ```
 </error_executor_failed>
@@ -978,17 +978,17 @@ Retry with: /founder-mode:execute-phase {N}
 
 **Execute current phase:**
 ```
-/founder-mode:execute-phase
+/fm:execute-phase
 ```
 
 **Execute specific phase:**
 ```
-/founder-mode:execute-phase 3
+/fm:execute-phase 3
 ```
 
 **Execute gap closure plans only:**
 ```
-/founder-mode:execute-phase 2 --gaps-only
+/fm:execute-phase 2 --gaps-only
 ```
 
 ---

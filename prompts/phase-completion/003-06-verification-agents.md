@@ -399,7 +399,7 @@ gaps:  # Only if gaps_found
 1. **{Truth}** - {reason}
    - Missing: {what to add}
 
-Structured gaps in VERIFICATION.md for /founder-mode:plan-phase --gaps
+Structured gaps in VERIFICATION.md for /fm:plan-phase --gaps
 ```
 
 ## Stub Detection Patterns

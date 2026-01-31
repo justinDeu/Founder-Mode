@@ -2,7 +2,7 @@
 
 ## Objective
 
-Implement Jira ticket fetching and the `/founder-mode:list-jira-tickets` command.
+Implement Jira ticket fetching and the `/fm:list-jira-tickets` command.
 
 ## Prerequisites
 
@@ -216,7 +216,7 @@ elif [ -f .founder-mode/jira.json ]; then
   }
 else
   echo "ERROR: Jira not configured"
-  echo "See: /founder-mode:help jira-setup"
+  echo "See: /fm:help jira-setup"
   exit 1
 fi
 ```
@@ -284,8 +284,8 @@ PROJ-789 [Task] Update documentation
          Sprint: Sprint 24
 
 Commands:
-  /founder-mode:fix-jira-ticket PROJ-123
-  /founder-mode:fix-issues PROJ-123 PROJ-456  (parallel)
+  /fm:fix-jira-ticket PROJ-123
+  /fm:fix-issues PROJ-123 PROJ-456  (parallel)
 ```
 
 ### Step 6: Handle Errors

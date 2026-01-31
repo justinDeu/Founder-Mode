@@ -2,7 +2,7 @@
 
 ## Objective
 
-Implement parallel issue execution using worktrees and the `/founder-mode:fix-issues` command.
+Implement parallel issue execution using worktrees and the `/fm:fix-issues` command.
 
 ## Prerequisites
 

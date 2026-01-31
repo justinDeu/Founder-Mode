@@ -2,7 +2,7 @@
 
 ## Objective
 
-Implement `/founder-mode:execute-phase [N]` command with wave-based parallel execution and goal-backward verification.
+Implement `/fm:execute-phase [N]` command with wave-based parallel execution and goal-backward verification.
 
 ## Prerequisites
 
@@ -219,7 +219,7 @@ Task(
 |--------|--------|
 | passed | Continue to step 8 |
 | human_needed | Present items, get approval |
-| gaps_found | Present gaps, offer `/founder-mode:plan-phase {N} --gaps` |
+| gaps_found | Present gaps, offer `/fm:plan-phase {N} --gaps` |
 
 ### Step 8: Update State
 
@@ -256,7 +256,7 @@ PHASE {N} COMPLETE
 {X} plans executed
 Goal verified ✓
 
-Next: /founder-mode:discuss-phase {N+1}
+Next: /fm:discuss-phase {N+1}
 ```
 
 **If last phase:**
@@ -266,7 +266,7 @@ MILESTONE COMPLETE
 All phases executed
 Ready for review
 
-Next: /founder-mode:verify-work (manual testing)
+Next: /fm:verify-work (manual testing)
 ```
 
 **If gaps found:**
@@ -278,7 +278,7 @@ Score: {X}/{Y} must-haves verified
 What's Missing:
 {Gap summaries from VERIFICATION.md}
 
-Next: /founder-mode:plan-phase {N} --gaps
+Next: /fm:plan-phase {N} --gaps
 ```
 
 ## Checkpoint Handling

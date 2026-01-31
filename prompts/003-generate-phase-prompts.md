@@ -135,10 +135,10 @@ This prompt:
 
 `prompts/phase-completion/003-02-new-project.md`
 
-**Purpose:** Implement the unified `/founder-mode:new-project` command that initializes a project from scratch with deep context gathering.
+**Purpose:** Implement the unified `/fm:new-project` command that initializes a project from scratch with deep context gathering.
 
 **User Flow:**
-1. User runs `/founder-mode:new-project`
+1. User runs `/fm:new-project`
 2. Command asks 4-6 essential questions (vision, core priority, boundaries, constraints)
 3. Command offers research path (recommended) or fast path (skip research)
 4. If research: spawn parallel research agents to investigate stack, features, architecture, pitfalls
@@ -190,7 +190,7 @@ This prompt:
 
 `prompts/phase-completion/003-03-discuss-phase.md`
 
-**Purpose:** Implement `/founder-mode:discuss-phase [N]` command that captures user vision and decisions before planning begins.
+**Purpose:** Implement `/fm:discuss-phase [N]` command that captures user vision and decisions before planning begins.
 
 **Why This Exists:**
 - Prevents Claude from making assumptions about UI, UX, behavior
@@ -259,7 +259,7 @@ Ideas mentioned but out of scope for this phase.
 
 `prompts/phase-completion/003-04-plan-phase.md`
 
-**Purpose:** Implement `/founder-mode:plan-phase [N]` command with pre-execution validation loop.
+**Purpose:** Implement `/fm:plan-phase [N]` command with pre-execution validation loop.
 
 **Planning Flow:**
 1. Load phase context (ROADMAP goal, REQUIREMENTS for this phase, CONTEXT.md from discuss-phase)
@@ -298,7 +298,7 @@ must_haves:
 # Plan 03-01: Project Initialization Command
 
 ## Objective
-Create the /founder-mode:new-project command that initializes projects.
+Create the /fm:new-project command that initializes projects.
 
 ## Requirements Addressed
 - REQ-007: Greenfield project initialization
@@ -366,7 +366,7 @@ If phase involves unfamiliar domain (3D, audio, ML, payments, etc.):
 
 `prompts/phase-completion/003-05-execute-phase.md`
 
-**Purpose:** Implement `/founder-mode:execute-phase [N]` command with wave-based parallel execution and goal-backward verification.
+**Purpose:** Implement `/fm:execute-phase [N]` command with wave-based parallel execution and goal-backward verification.
 
 **Execution Flow:**
 1. Load all PLAN.md files for phase N
@@ -468,7 +468,7 @@ commits:
 # Plan 03-01 Summary
 
 ## What Was Built
-- /founder-mode:new-project command with questioning flow
+- /fm:new-project command with questioning flow
 - State management utilities (createProject, updateState, addRequirement)
 
 ## Files Changed
@@ -609,8 +609,8 @@ Create `references/verification-patterns.md` documenting how to verify different
 
 **Integration with Commands:**
 
-- `/founder-mode:plan-phase` spawns plan-checker after creating plans
-- `/founder-mode:execute-phase` spawns verifier after execution completes
+- `/fm:plan-phase` spawns plan-checker after creating plans
+- `/fm:execute-phase` spawns verifier after execution completes
 - Both agents return structured output for orchestrator to process
 - Orchestrator presents results to user and handles fix flows
 
@@ -620,7 +620,7 @@ Create `references/verification-patterns.md` documenting how to verify different
 
 `prompts/phase-completion/004-01-github-integration.md`
 
-**Purpose:** Implement GitHub issue fetching and the `/founder-mode:list-github-issues` command.
+**Purpose:** Implement GitHub issue fetching and the `/fm:list-github-issues` command.
 
 **Why This Matters:**
 - Pull work items directly from GitHub instead of manual copy-paste
@@ -644,7 +644,7 @@ gh issue view 123 --json title,body,labels,assignees,milestone
 gh issue list --json number,title,body,labels,state
 ```
 
-**Command: /founder-mode:list-github-issues**
+**Command: /fm:list-github-issues**
 
 ```markdown
 # List GitHub Issues
@@ -675,8 +675,8 @@ GitHub Issues (5 open, assigned to @me)
      Created: 3 days ago
 
 Commands:
-  /founder-mode:fix-gh-issue 123    Fix issue #123
-  /founder-mode:fix-gh-issue 123 456 789    Fix multiple issues
+  /fm:fix-gh-issue 123    Fix issue #123
+  /fm:fix-gh-issue 123 456 789    Fix multiple issues
 ```
 
 **Issue Normalization:**
@@ -712,7 +712,7 @@ interface NormalizedIssue {
 
 `prompts/phase-completion/004-02-jira-integration.md`
 
-**Purpose:** Implement Jira ticket fetching and the `/founder-mode:list-jira-tickets` command.
+**Purpose:** Implement Jira ticket fetching and the `/fm:list-jira-tickets` command.
 
 **Jira API Options:**
 
@@ -748,7 +748,7 @@ Jira requires API tokens. Configuration options:
 }
 ```
 
-**Command: /founder-mode:list-jira-tickets**
+**Command: /fm:list-jira-tickets**
 
 ```markdown
 # List Jira Tickets
@@ -773,7 +773,7 @@ PROJ-456 [Story] Add dark mode support
          Sprint: Sprint 23
 
 Commands:
-  /founder-mode:fix-jira-ticket PROJ-123
+  /fm:fix-jira-ticket PROJ-123
 ```
 
 **Issue Normalization:**
@@ -813,12 +813,12 @@ interface NormalizedIssue {
 
 `prompts/phase-completion/004-03-fix-gh-issue.md`
 
-**Purpose:** Implement the end-to-end `/founder-mode:fix-gh-issue` workflow that goes from issue to PR.
+**Purpose:** Implement the end-to-end `/fm:fix-gh-issue` workflow that goes from issue to PR.
 
 **Complete Workflow:**
 
 ```
-/founder-mode:fix-gh-issue 123
+/fm:fix-gh-issue 123
        ↓
 1. Fetch issue details from GitHub
        ↓
@@ -839,7 +839,7 @@ interface NormalizedIssue {
 9. Output PR URL
 ```
 
-**Command: /founder-mode:fix-gh-issue**
+**Command: /fm:fix-gh-issue**
 
 ```markdown
 # Fix GitHub Issue
@@ -991,7 +991,7 @@ Verification:
 **User Story:**
 "I have 5 bugs assigned to me. I want to say 'fix these' and have founder-mode work on all of them in parallel, showing me progress, and delivering 5 PRs."
 
-**Command: /founder-mode:fix-issues**
+**Command: /fm:fix-issues**
 
 ```markdown
 # Fix Multiple Issues
@@ -1125,7 +1125,7 @@ Current: Waiting to start
 Progress: 0/4 complete
 ```
 
-**Command: /founder-mode:run-sprint**
+**Command: /fm:run-sprint**
 
 ```markdown
 # Run Sprint
@@ -1142,13 +1142,13 @@ Progress: 0/4 complete
 ### Step 1: Build Queue
 ```bash
 # From explicit list
-/founder-mode:run-sprint --issues 123,456,789
+/fm:run-sprint --issues 123,456,789
 
 # From GitHub assigned issues
-/founder-mode:run-sprint --from-github --assignee @me
+/fm:run-sprint --from-github --assignee @me
 
 # From Jira sprint
-/founder-mode:run-sprint --from-jira --sprint "Sprint 23"
+/fm:run-sprint --from-jira --sprint "Sprint 23"
 ```
 
 ### Step 2: Present Sprint Plan
@@ -1257,15 +1257,15 @@ queue:
 
 Resume with:
 ```
-/founder-mode:run-sprint --resume
+/fm:run-sprint --resume
 ```
 
 **Issue Queue Management:**
 Allow mid-sprint queue modifications:
 ```
-/founder-mode:sprint-add 999    # Add issue to queue
-/founder-mode:sprint-remove 456 # Remove from queue
-/founder-mode:sprint-priority 789 1  # Move #789 to position 1
+/fm:sprint-add 999    # Add issue to queue
+/fm:sprint-remove 456 # Remove from queue
+/fm:sprint-priority 789 1  # Move #789 to position 1
 ```
 
 **Files Created:**

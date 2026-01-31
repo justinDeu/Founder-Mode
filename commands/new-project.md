@@ -1,5 +1,5 @@
 ---
-name: founder-mode:new-project
+name: fm:new-project
 description: Initialize a new project with deep context gathering and planning artifacts
 argument-hint: [--skip-research] [--brownfield]
 allowed-tools:
@@ -984,10 +984,10 @@ Summary:
 - Planning depth: {depth}
 
 Next step:
-  /founder-mode:plan-phase 1
+  /fm:plan-phase 1
 
 Or check progress:
-  /founder-mode:progress
+  /fm:progress
 ```
 </completion_message>
 
@@ -1014,7 +1014,7 @@ mv .founder-mode .founder-mode.bak.{timestamp}
 
 If "Resume":
 ```
-Use /founder-mode:progress to check current state.
+Use /fm:progress to check current state.
 ```
 </error_directory_exists>
 
@@ -1055,15 +1055,15 @@ Use AskUserQuestion to let user decide.
 
 **Initialize new project:**
 ```
-/founder-mode:new-project
+/fm:new-project
 ```
 
 **Skip research (known domain):**
 ```
-/founder-mode:new-project --skip-research
+/fm:new-project --skip-research
 ```
 
 **Force brownfield mode:**
 ```
-/founder-mode:new-project --brownfield
+/fm:new-project --brownfield
 ```

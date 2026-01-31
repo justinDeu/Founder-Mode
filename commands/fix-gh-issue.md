@@ -1,5 +1,5 @@
 ---
-name: founder-mode:fix-gh-issue
+name: fm:fix-gh-issue
 description: Fix a GitHub issue end-to-end from issue to PR
 argument-hint: "<issue-number> [--no-worktree] [--no-pr] [--draft] [--model ?|claude|codex|...]"
 allowed-tools:
@@ -510,37 +510,37 @@ Manual creation:
 
 **Fix single issue:**
 ```
-/founder-mode:fix-gh-issue 123
+/fm:fix-gh-issue 123
 ```
 → Asks for model, generates prompt, runs via run-prompt, creates PR
 
 **Fix multiple issues (always separate worktrees):**
 ```
-/founder-mode:fix-gh-issue 123 456 789
+/fm:fix-gh-issue 123 456 789
 ```
 → Creates 3 separate worktrees, generates 3 prompts, runs via orchestrate, creates 3 separate PRs
 
 **Fix dependent issues:**
 ```
-/founder-mode:fix-gh-issue 100 101  # where 101 depends on 100
+/fm:fix-gh-issue 100 101  # where 101 depends on 100
 ```
 → Creates separate worktrees, works in parallel, merges 100 into 101's worktree when ready, creates 2 PRs
 
 **Fix with specific model:**
 ```
-/founder-mode:fix-gh-issue 123 --model codex
+/fm:fix-gh-issue 123 --model codex
 ```
 → Skips model selection, uses codex
 
 **Fix without worktree:**
 ```
-/founder-mode:fix-gh-issue 123 --no-worktree
+/fm:fix-gh-issue 123 --no-worktree
 ```
 → Works in current directory instead of isolated worktree
 
 **Fix as draft PR:**
 ```
-/founder-mode:fix-gh-issue 123 --draft
+/fm:fix-gh-issue 123 --draft
 ```
 → Creates draft PR instead of ready-for-review
 

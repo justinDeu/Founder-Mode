@@ -2,7 +2,7 @@
 
 ## Objective
 
-Implement `/founder-mode:discuss-phase [N]` command that captures user vision and decisions before planning begins. This prevents Claude from making assumptions about implementation details.
+Implement `/fm:discuss-phase [N]` command that captures user vision and decisions before planning begins. This prevents Claude from making assumptions about implementation details.
 
 ## Prerequisites
 
@@ -51,7 +51,7 @@ Parse from $ARGUMENTS:
 
 ```bash
 # Check project exists
-[ -d .founder-mode ] || { echo "ERROR: No project. Run /founder-mode:new-project"; exit 1; }
+[ -d .founder-mode ] || { echo "ERROR: No project. Run /fm:new-project"; exit 1; }
 
 # Normalize phase number
 PHASE=$(printf "%02d" $PHASE_ARG)
@@ -206,10 +206,10 @@ PHASE {N} CONTEXT CAPTURED
 {Z} deferred ideas noted
 
 Downstream consumers:
-- /founder-mode:plan-phase reads this for planning
+- /fm:plan-phase reads this for planning
 - Research agent (if used) focuses on undecided areas
 
-Next: /founder-mode:plan-phase {N}
+Next: /fm:plan-phase {N}
 ```
 
 ## Downstream Consumers
