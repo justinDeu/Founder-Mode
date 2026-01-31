@@ -164,7 +164,7 @@ allowed-tools:
 **When to use:** Any skill that spawns sub-agents
 **How it works:**
 ```
-1. User invokes skill (e.g., /founder-mode:run-prompt 123)
+1. User invokes skill (e.g., /fm:run-prompt 123)
 2. Skill calls executor.py with arguments
 3. Executor resolves:
    - Prompt file path and content

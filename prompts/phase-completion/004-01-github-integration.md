@@ -2,7 +2,7 @@
 
 ## Objective
 
-Implement GitHub issue fetching and the `/founder-mode:list-github-issues` command. This is the foundation for the /fix-gh-issue workflow.
+Implement GitHub issue fetching and the `/fm:list-github-issues` command. This is the foundation for the /fix-gh-issue workflow.
 
 ## Prerequisites
 
@@ -169,8 +169,8 @@ GitHub Issues ({count} {state}, assigned to {assignee})
      Created: 3 days ago
 
 Commands:
-  /founder-mode:fix-gh-issue 123         Fix issue #123
-  /founder-mode:fix-gh-issue 123 456 789 Fix multiple issues
+  /fm:fix-gh-issue 123         Fix issue #123
+  /fm:fix-gh-issue 123 456 789 Fix multiple issues
 ```
 
 ### Step 6: Handle Errors

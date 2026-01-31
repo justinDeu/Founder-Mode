@@ -144,15 +144,15 @@ Run these tests:
 
 ```bash
 # Test OpenCode foreground - check log has content
-/founder-mode:run-prompt test-prompt.md --model opencode
+/fm:run-prompt test-prompt.md --model opencode
 cat .founder-mode/logs/*.log | head -50
 
 # Test OpenCode background - verify log monitoring works
-/founder-mode:run-prompt test-prompt.md --model opencode --background
+/fm:run-prompt test-prompt.md --model opencode --background
 tail -f .founder-mode/logs/*.log
 
 # Test other models still work
-/founder-mode:run-prompt test-prompt.md --model codex
+/fm:run-prompt test-prompt.md --model codex
 ```
 
 Success criteria:
