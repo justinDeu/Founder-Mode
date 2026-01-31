@@ -23,6 +23,7 @@ Execute a prompt file. Default: runs immediately in Claude with no menus, no con
 | `--model` | option | (prompt) | Model to use. Omit or use `?` to select interactively. |
 | `--background` | flag | false | Run in background |
 | `--worktree` | flag | false | Create isolated git worktree |
+| `--worktree-cleanup` | flag | false | Remove worktree after execution (with --worktree) |
 | `--cwd` | option | repo root | Working directory |
 | `--log` | option | auto | Log file path (non-Claude only) |
 | `--verbose` | flag | false | Show detailed execution metadata |
@@ -63,21 +64,27 @@ Result JSON includes:
 }
 ```
 
-## Default Execution
+## Model Selection (REQUIRED)
 
-When no `--model` is specified (or `--model ?` is used), prompt the user to select a model:
+<critical>
+ALWAYS ask the user to select a model before execution. This step is MANDATORY and must NEVER be skipped, even if it seems obvious which model to use.
+
+The only exception is when `--model` is explicitly provided in the arguments.
+</critical>
+
+When no `--model` is specified (or `--model ?` is used):
+
+1. Read prompt content
+2. **MUST** ask user to select a model using AskUserQuestion
+3. Wait for user selection
+4. Execute with chosen model
+5. Show result
 
 ```
 /founder-mode:run-prompt prompts/fix-bug.md
 ```
 
-This:
-1. Reads prompt content
-2. Asks user to select a model
-3. Executes with chosen model
-4. Shows result
-
-To skip the prompt and run immediately, specify a model explicitly:
+To skip the model selection prompt, specify a model explicitly:
 ```
 /founder-mode:run-prompt prompts/fix-bug.md --model claude
 ```
@@ -112,46 +119,104 @@ Validate prompt file exists:
 test -f "$prompt_file" && echo "exists" || echo "missing"
 ```
 
-### Step 2: Model Selection (if no --model or --model ?)
+### Step 2: Model Selection (MANDATORY unless --model provided)
 
-If `model` is null or `?`, prompt the user to select a model.
+<critical>
+If `model` is null or `?`, you MUST use AskUserQuestion to ask the user which model to use. Do NOT proceed to execution without explicit user selection. Do NOT assume "claude" or any other default.
+</critical>
 
-Use AskUserQuestion tool with options:
-- `claude` - Claude in current session
-- `claude-zai` - Claude CLI with Z.AI backend
-- `codex` - OpenAI gpt-5.2-codex via codex CLI
-- `gemini` - Gemini 3 Flash via gemini CLI
-- `opencode-zai` - OpenCode with Z.AI GLM-4.7
-- `opencode-codex` - OpenCode with gpt-5.2-codex
+```
+AskUserQuestion(
+  questions: [{
+    question: "Which model should execute this prompt?",
+    header: "Model",
+    options: [
+      { label: "claude", description: "Claude in current session" },
+      { label: "claude-zai", description: "Claude CLI with Z.AI backend" },
+      { label: "codex", description: "OpenAI gpt-5.2-codex via codex CLI" },
+      { label: "gemini", description: "Gemini 3 Flash via gemini CLI" }
+    ]
+  }]
+)
+```
+
+**Wait for user response before proceeding to Step 3.**
 
 ### Step 3: Worktree Creation (if --worktree)
 
 Create isolated git worktree for execution. This happens in the skill layer, not executor.
 
+See `references/worktree-management.md` for full details.
+
+**Step 3a: Detect Location**
+
 ```bash
-# Get repo root
-REPO_ROOT=$(git rev-parse --show-toplevel)
-REPO_NAME=$(basename "$REPO_ROOT")
+COMMON_DIR=$(git rev-parse --git-common-dir | sed 's|/\.git$||')
+CURRENT_DIR=$(pwd)
+```
 
-# Extract prompt identifier from filename
-PROMPT_SLUG=$(basename "$prompt_file" .md)
-TIMESTAMP=$(date +%Y%m%d-%H%M%S)
+**Step 3b: Read Config**
 
-# Create worktree directory
-WORKTREES_DIR="${REPO_ROOT}/.worktrees"
-mkdir -p "$WORKTREES_DIR"
+Read `worktree_dir` and `worktree_naming.prompt` from founder_mode_config.
 
-# Branch and worktree names
-BRANCH_NAME="prompt/${PROMPT_SLUG}"
-WORKTREE_PATH="${WORKTREES_DIR}/${REPO_NAME}-${PROMPT_SLUG}-${TIMESTAMP}"
+Defaults:
+- `worktree_dir: ./` (flat layout in common directory)
+- `worktree_naming.prompt: prompt-{number}-{slug}`
+
+**Step 3c: Generate Name**
+
+```bash
+# Extract prompt number from filename (e.g., 001 from 001-setup.md)
+PROMPT_NUMBER=$(basename "$prompt_file" .md | grep -oE '^[0-9]+')
+
+# Generate slug from prompt title or filename
+PROMPT_SLUG=$(basename "$prompt_file" .md | sed 's/^[0-9]*-//')
+
+# Apply naming template
+WORKTREE_NAME="prompt-${PROMPT_NUMBER}-${PROMPT_SLUG}"
+```
+
+**Step 3d: Compute Path**
+
+```bash
+# Resolve worktree_dir relative to common directory
+case "$WORKTREE_DIR_CONFIG" in
+  /*|~*) WORKTREE_BASE="${WORKTREE_DIR_CONFIG/#\~/$HOME}" ;;
+  *)     WORKTREE_BASE="$COMMON_DIR/$WORKTREE_DIR_CONFIG" ;;
+esac
+
+WORKTREE_PATH="$WORKTREE_BASE/$WORKTREE_NAME"
+```
+
+**Step 3e: Check Location and Confirm**
+
+If `CURRENT_DIR != COMMON_DIR` (user is in a worktree), ask for confirmation:
+
+```
+AskUserQuestion(
+  questions: [{
+    question: "You're in worktree '{current_worktree}'. Create new worktree at {WORKTREE_PATH}?",
+    header: "Worktree Path",
+    options: [
+      { label: "Yes, create there", description: "New worktree at {path}" },
+      { label: "Change location", description: "Specify a different path" },
+      { label: "Cancel", description: "Don't create a worktree" }
+    ]
+  }]
+)
+```
+
+**Step 3f: Create Worktree**
+
+```bash
+# Create parent directory if needed
+mkdir -p "$(dirname "$WORKTREE_PATH")"
 
 # Check if branch exists
-if git branch --list "$BRANCH_NAME" | grep -q .; then
-    # Branch exists - create worktree from it
-    git worktree add "$WORKTREE_PATH" "$BRANCH_NAME"
+if git branch --list "$WORKTREE_NAME" | grep -q .; then
+    git worktree add "$WORKTREE_PATH" "$WORKTREE_NAME"
 else
-    # Create new branch from main
-    git worktree add -b "$BRANCH_NAME" "$WORKTREE_PATH" main
+    git worktree add "$WORKTREE_PATH" -b "$WORKTREE_NAME" main
 fi
 
 # Copy prompt as TASK.md
@@ -159,6 +224,25 @@ cp "$prompt_file" "$WORKTREE_PATH/TASK.md"
 ```
 
 Update `cwd` to `$WORKTREE_PATH` for subsequent execution.
+
+**Step 3g: Cleanup (if --worktree-cleanup)**
+
+If `--worktree-cleanup` flag was specified, remove worktree after execution:
+
+```bash
+git worktree remove "$WORKTREE_PATH"
+git worktree prune
+```
+
+By default, worktrees are kept for review. Report location after execution:
+
+```
+Worktree: {WORKTREE_PATH}
+Branch: {WORKTREE_NAME}
+
+Clean up when done:
+  git worktree remove {WORKTREE_PATH}
+```
 
 ### Step 4a: Claude Execution
 

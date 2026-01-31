@@ -1,7 +1,7 @@
 ---
 name: founder-mode:fix-gh-issue
 description: Fix a GitHub issue end-to-end from issue to PR
-argument-hint: "<issue-number> [--worktree] [--no-pr] [--draft]"
+argument-hint: "<issue-number> [--no-worktree] [--no-pr] [--draft]"
 allowed-tools:
   - Read
   - Write
@@ -21,8 +21,8 @@ Complete workflow: fetch issue → analyze → fix → test → PR.
 
 Parse from $ARGUMENTS:
 - Issue number(s): Single (123) or multiple (123 456 789)
-- `--worktree`: Create isolated worktree for fix
-- `--branch`: Custom branch name (default: fix/issue-{number})
+- `--no-worktree`: Skip worktree creation (default: creates worktree)
+- `--branch`: Custom branch name (default: uses github naming template)
 - `--no-pr`: Skip PR creation, just commit
 - `--draft`: Create draft PR
 
@@ -71,20 +71,77 @@ ACTUAL=$(echo "$BODY" | grep -A 5 -i "actual\|instead\|but")
 - Single file fix: Simple, proceed directly
 - Multi-file fix: Create mini-plan
 
-### Step 3: Create Worktree (if --worktree)
+### Step 3: Create Worktree (default, skip with --no-worktree)
+
+See `references/worktree-management.md` for full details.
+
+**Step 3a: Detect Location**
 
 ```bash
-# Get worktree directory from config
-WORKTREE_DIR=$(cat .founder-mode/config.json 2>/dev/null | jq -r '.worktree_dir // ".worktrees"')
+COMMON_DIR=$(git rev-parse --git-common-dir | sed 's|/\.git$||')
+CURRENT_DIR=$(pwd)
+```
 
-mkdir -p "$WORKTREE_DIR"
+**Step 3b: Read Config**
 
-# Create worktree with branch
-BRANCH="${BRANCH_ARG:-fix/issue-$NUMBER}"
-git worktree add "$WORKTREE_DIR/issue-$NUMBER" -b "$BRANCH"
+Read from founder_mode_config:
+- `worktree_dir` (default: `./`)
+- `worktree_naming.github` (default: `gh-{number}-{slug}`)
+
+**Step 3c: Generate Name**
+
+```bash
+# Generate slug from issue title
+SLUG=$(echo "$TITLE" | tr '[:upper:]' '[:lower:]' | sed 's/[^a-z0-9]/ /g' | \
+  tr ' ' '\n' | grep -vE '^(a|an|the|in|on|at|to|for|of)$' | head -5 | \
+  tr '\n' '-' | sed 's/--*/-/g' | sed 's/-$//' | cut -c1-30)
+
+# Apply naming template
+WORKTREE_NAME="gh-${NUMBER}-${SLUG}"
+```
+
+**Step 3d: Compute Path**
+
+```bash
+case "$WORKTREE_DIR_CONFIG" in
+  /*|~*) WORKTREE_BASE="${WORKTREE_DIR_CONFIG/#\~/$HOME}" ;;
+  *)     WORKTREE_BASE="$COMMON_DIR/$WORKTREE_DIR_CONFIG" ;;
+esac
+
+WORKTREE_PATH="$WORKTREE_BASE/$WORKTREE_NAME"
+```
+
+**Step 3e: Check Location and Confirm**
+
+If `CURRENT_DIR != COMMON_DIR` (user is in a worktree), ask for confirmation:
+
+```
+AskUserQuestion(
+  questions: [{
+    question: "You're in worktree '{current_worktree}'. Create new worktree at {WORKTREE_PATH}?",
+    header: "Worktree Path",
+    options: [
+      { label: "Yes, create there", description: "New worktree at {path}" },
+      { label: "Change location", description: "Specify a different path" },
+      { label: "Cancel", description: "Don't create a worktree" }
+    ]
+  }]
+)
+```
+
+**Step 3f: Create Worktree**
+
+```bash
+mkdir -p "$(dirname "$WORKTREE_PATH")"
+
+if git branch --list "$WORKTREE_NAME" | grep -q .; then
+    git worktree add "$WORKTREE_PATH" "$WORKTREE_NAME"
+else
+    git worktree add "$WORKTREE_PATH" -b "$WORKTREE_NAME" main
+fi
 
 # Switch context
-cd "$WORKTREE_DIR/issue-$NUMBER"
+cd "$WORKTREE_PATH"
 ```
 
 ### Step 4: Codebase Analysis

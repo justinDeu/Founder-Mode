@@ -17,18 +17,63 @@ Configure founder-mode using the `<founder_mode_config>` block in your project's
 
 ```xml
 <founder_mode_config>
-worktree_dir: ~/.worktrees/
+worktree_dir: ./
 logs_dir: .founder-mode/logs/
 prompts_dir: ./prompts/
+worktree_naming:
+  prompt: prompt-{number}-{slug}
+  github: gh-{number}-{slug}
+  jira: {project}-{number}-{slug}
+  default: wt-{slug}
 </founder_mode_config>
 ```
 
 **Settings:**
-- `worktree_dir` - Where to create isolated worktrees (default: `.worktrees/`)
+- `worktree_dir` - Where to create isolated worktrees, relative to git common directory (default: `./`)
 - `logs_dir` - Where to store execution logs (default: `.founder-mode/logs/`)
 - `prompts_dir` - Where prompts live (default: `./prompts/`)
+- `worktree_naming` - Naming templates per source type (see below)
 
 Priority: project CLAUDE.md > user ~/.claude/CLAUDE.md
+
+### Worktree Configuration
+
+**worktree_dir** specifies where worktrees are created. Paths resolve relative to the git common directory (the shared `.git` location), not the current working directory.
+
+| Value | Layout | Example Result |
+|-------|--------|----------------|
+| `./` | Flat siblings | `/project/gh-123-fix-bug` |
+| `./.worktrees/` | Nested subdirectory | `/project/.worktrees/gh-123-fix-bug` |
+| `~/.worktrees/myproject/` | Absolute path | `~/.worktrees/myproject/gh-123-fix-bug` |
+
+**worktree_naming** defines how worktrees are named based on their source:
+
+| Source | Template | Example |
+|--------|----------|---------|
+| `prompt` | `prompt-{number}-{slug}` | `prompt-006-git-worktree-integration` |
+| `github` | `gh-{number}-{slug}` | `gh-123-fix-login-redirect` |
+| `jira` | `{project}-{number}-{slug}` | `PROJ-456-add-auth-flow` |
+| `default` | `wt-{slug}` | `wt-my-feature` |
+
+**Available variables:**
+- `{number}` - Issue/prompt number
+- `{slug}` - Sanitized title (max 30 chars, lowercase, hyphens)
+- `{project}` - Jira project key
+- `{date}` - Current date (YYYY-MM-DD)
+- `{branch}` - Base branch name
+
+### Future: Environment Setup (Planned)
+
+```xml
+<founder_mode_config>
+worktree_setup:
+  detect: true
+  hooks:
+    - ./scripts/setup-env.sh
+</founder_mode_config>
+```
+
+When implemented, this will auto-detect project type and run setup after worktree creation.
 
 ## Available Commands
 
