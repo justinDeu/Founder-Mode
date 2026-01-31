@@ -19,20 +19,20 @@ Progress: █████░░░░░ 50%
 ## Performance Metrics
 
 **Velocity:**
-- Total plans completed: 4
-- Average duration: 3.25 min
-- Total execution time: 0.22 hours
+- Total plans completed: 5
+- Average duration: 3.4 min
+- Total execution time: 0.28 hours
 
 **By Phase:**
 
 | Phase | Plans | Total | Avg/Plan |
 |-------|-------|-------|----------|
 | 2 | 2 | 6 min | 3 min |
-| 3 | 2 | 5 min | 2.5 min |
+| 3 | 3 | 11 min | 3.7 min |
 
 **Recent Trend:**
-- Last 5 plans: 02-01 (4 min), 02-02 (2 min), 03-01 (4 min), 03-04 (1 min)
-- Trend: Improving
+- Last 5 plans: 02-01 (4 min), 02-02 (2 min), 03-01 (4 min), 03-04 (1 min), 03-02 (6 min)
+- Trend: Stable
 
 ## Accumulated Context
 
@@ -53,6 +53,8 @@ Recent decisions affecting current work:
 - ASCII decision flow diagrams for reference docs
 - State stored project-locally in .founder-mode/state/
 - State functions require cwd parameter for explicit dependency injection
+- Per-iteration logs: {prompt}-iter{N}-{timestamp}.log for debugging
+- Loop log: {prompt}-loop-{timestamp}.log for execution overview
 
 ### Deferred Issues
 
@@ -64,6 +66,6 @@ None yet.
 
 ## Session Continuity
 
-Last session: 2026-01-31T16:48:05Z
-Stopped at: Completed 03-01-PLAN.md (State Persistence Layer)
+Last session: 2026-01-31T11:46:00Z
+Stopped at: Completed 03-02-PLAN.md (Per-Iteration Logging)
 Resume file: None
