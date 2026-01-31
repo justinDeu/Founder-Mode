@@ -2,7 +2,7 @@
 
 ## Objective
 
-Implement the end-to-end `/founder-mode:fix-gh-issue` workflow that goes from issue to PR.
+Implement the end-to-end `/fm:fix-gh-issue` workflow that goes from issue to PR.
 
 ## Prerequisites
 
@@ -350,7 +350,7 @@ To clean up: git worktree remove {worktree_path}
 When multiple issue numbers provided:
 
 ```
-/founder-mode:fix-gh-issue 123 456 789
+/fm:fix-gh-issue 123 456 789
 ```
 
 **Step 1: Dependency Analysis (before execution)**

@@ -1,5 +1,5 @@
 ---
-name: founder-mode:plan-phase
+name: fm:plan-phase
 description: Create executable PLAN.md files with pre-execution validation loop
 argument-hint: [N] [--gaps] [--skip-validation]
 allowed-tools:
@@ -44,19 +44,19 @@ Check that required project files exist:
 ```bash
 # Check for PROJECT.md
 if [ ! -f ".founder-mode/PROJECT.md" ]; then
-    echo "No project found. Run /founder-mode:new-project first."
+    echo "No project found. Run /fm:new-project first."
     exit 1
 fi
 
 # Check for ROADMAP.md
 if [ ! -f ".founder-mode/ROADMAP.md" ]; then
-    echo "No roadmap found. Run /founder-mode:new-project first."
+    echo "No roadmap found. Run /fm:new-project first."
     exit 1
 fi
 
 # Check for STATE.md
 if [ ! -f ".founder-mode/STATE.md" ]; then
-    echo "No state found. Run /founder-mode:new-project first."
+    echo "No state found. Run /fm:new-project first."
     exit 1
 fi
 
@@ -131,7 +131,7 @@ if grep -q "Phase $N:.*Complete" .founder-mode/ROADMAP.md; then
     echo "Phase $N is already complete."
     echo ""
     echo "To re-plan:"
-    echo "  /founder-mode:plan-phase $N --force"
+    echo "  /fm:plan-phase $N --force"
     exit 1
 fi
 ```
@@ -165,7 +165,7 @@ If research is "Likely" and no RESEARCH.md exists:
 AskUserQuestion:
   question: "This phase may need research. How to proceed?"
   options:
-    - "Run research first (/founder-mode:research-phase)"
+    - "Run research first (/fm:research-phase)"
     - "Skip research and plan directly"
     - "Cancel and do manual research"
 ```
@@ -174,10 +174,10 @@ If research selected, report:
 
 ```
 Research recommended. Run:
-  /founder-mode:research-phase {N}
+  /fm:research-phase {N}
 
 Then return to:
-  /founder-mode:plan-phase {N}
+  /fm:plan-phase {N}
 ```
 
 Exit and let user run research command.
@@ -665,7 +665,7 @@ Checkpoints:
 {/if}
 
 Next step:
-  /founder-mode:execute-phase {N}
+  /fm:execute-phase {N}
 
 Or review plans:
   cat .founder-mode/plans/phase-{N}/*-PLAN.md
@@ -766,7 +766,7 @@ If .founder-mode/PROJECT.md doesn't exist:
 ```
 No project found.
 
-Run /founder-mode:new-project first to initialize.
+Run /fm:new-project first to initialize.
 ```
 </error_no_project>
 
@@ -776,7 +776,7 @@ If .founder-mode/ROADMAP.md doesn't exist:
 ```
 No roadmap found.
 
-Run /founder-mode:new-project to create roadmap.
+Run /fm:new-project to create roadmap.
 ```
 </error_no_roadmap>
 
@@ -789,7 +789,7 @@ Phase {N} not found in ROADMAP.md.
 Available phases:
 {list phases from ROADMAP.md}
 
-Use: /founder-mode:plan-phase {valid_phase_number}
+Use: /fm:plan-phase {valid_phase_number}
 ```
 </error_phase_not_found>
 
@@ -800,7 +800,7 @@ If phase is already marked complete:
 Phase {N} is already complete.
 
 To re-plan (will archive existing plans):
-  /founder-mode:plan-phase {N} --force
+  /fm:plan-phase {N} --force
 ```
 </error_phase_complete>
 
@@ -813,9 +813,9 @@ Validation incomplete.
 {blocker_count} blockers remain after 3 iterations.
 
 Options:
-1. /founder-mode:plan-phase {N} --skip-validation
+1. /fm:plan-phase {N} --skip-validation
 2. Manually edit plans in .founder-mode/plans/phase-{N}/
-3. /founder-mode:discuss-phase {N} to gather more context
+3. /fm:discuss-phase {N} to gather more context
 ```
 </error_validation_failed>
 
@@ -825,27 +825,27 @@ Options:
 
 **Plan current phase:**
 ```
-/founder-mode:plan-phase
+/fm:plan-phase
 ```
 
 **Plan specific phase:**
 ```
-/founder-mode:plan-phase 3
+/fm:plan-phase 3
 ```
 
 **Plan inserted phase:**
 ```
-/founder-mode:plan-phase 2.1
+/fm:plan-phase 2.1
 ```
 
 **Gap closure mode:**
 ```
-/founder-mode:plan-phase 2 --gaps
+/fm:plan-phase 2 --gaps
 ```
 
 **Skip validation (force):**
 ```
-/founder-mode:plan-phase 1 --skip-validation
+/fm:plan-phase 1 --skip-validation
 ```
 
 ---

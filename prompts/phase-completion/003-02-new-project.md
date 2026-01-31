@@ -2,7 +2,7 @@
 
 ## Objective
 
-Implement the unified `/founder-mode:new-project` command that initializes a project from scratch with deep context gathering. This is the entry point for all new founder-mode projects.
+Implement the unified `/fm:new-project` command that initializes a project from scratch with deep context gathering. This is the entry point for all new founder-mode projects.
 
 ## Prerequisites
 
@@ -262,7 +262,7 @@ PROJECT INITIALIZED
 
 {N} phases | {X} requirements | Ready to build
 
-Next: /founder-mode:discuss-phase 1
+Next: /fm:discuss-phase 1
 ```
 
 ## Success Criteria
@@ -296,7 +296,7 @@ Check that command file has:
 
 ### Step 3: Test Command Registration
 
-The command should be accessible via `/founder-mode:new-project` when founder-mode plugin is loaded.
+The command should be accessible via `/fm:new-project` when founder-mode plugin is loaded.
 
 ## Verification
 

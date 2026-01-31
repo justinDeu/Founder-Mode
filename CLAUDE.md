@@ -77,12 +77,12 @@ When implemented, this will auto-detect project type and run setup after worktre
 
 ## Available Commands
 
-### /founder-mode:run-prompt
+### /fm:run-prompt
 
 Execute a prompt with Claude or other AI models.
 
 ```
-/founder-mode:run-prompt <prompt-file> [--model claude|codex|gemini] [--background] [--worktree]
+/fm:run-prompt <prompt-file> [--model claude|codex|gemini] [--background] [--worktree]
 ```
 
 **Arguments:**
@@ -93,16 +93,16 @@ Execute a prompt with Claude or other AI models.
 
 **Examples:**
 ```
-/founder-mode:run-prompt prompts/001-setup.md
-/founder-mode:run-prompt prompts/001-setup.md --model codex --worktree
+/fm:run-prompt prompts/001-setup.md
+/fm:run-prompt prompts/001-setup.md --model codex --worktree
 ```
 
-### /founder-mode:orchestrate
+### /fm:orchestrate
 
 Execute multiple prompts with dependency management and parallel execution.
 
 ```
-/founder-mode:orchestrate <orchestrator-file|prompt-list> [--model ?|claude|codex|...] [--pending-only]
+/fm:orchestrate <orchestrator-file|prompt-list> [--model ?|claude|codex|...] [--pending-only]
 ```
 
 **Arguments:**
@@ -114,9 +114,9 @@ Execute multiple prompts with dependency management and parallel execution.
 
 **Examples:**
 ```
-/founder-mode:orchestrate prompts/phase-completion/000-orchestrator.md
-/founder-mode:orchestrate 003-01,003-02,003-03 --model codex
-/founder-mode:orchestrate prompts/000-orchestrator.md --pending-only --background
+/fm:orchestrate prompts/phase-completion/000-orchestrator.md
+/fm:orchestrate 003-01,003-02,003-03 --model codex
+/fm:orchestrate prompts/000-orchestrator.md --pending-only --background
 ```
 
 ## Deviation Handling

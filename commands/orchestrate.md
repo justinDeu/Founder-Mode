@@ -1,5 +1,5 @@
 ---
-name: founder-mode:orchestrate
+name: fm:orchestrate
 description: Execute multiple prompts with dependency management and parallel execution
 argument-hint: <orchestrator-file|prompt-list> [--model ?|claude|codex|...] [--pending-only]
 allowed-tools:
@@ -183,7 +183,7 @@ Working directory: {cwd}
 Model: {selected_model}
 
 If non-Claude model, call:
-/founder-mode:run-prompt {prompt_path} --model {model} {--background} {--worktree}
+/fm:run-prompt {prompt_path} --model {model} {--background} {--worktree}
 
 Execute completely. Write results to .founder-mode/logs/{prompt_id}-result.json:
 {
@@ -304,22 +304,22 @@ Write updated file.
 
 **Run orchestrator file:**
 ```
-/founder-mode:orchestrate prompts/phase-completion/000-orchestrator.md
+/fm:orchestrate prompts/phase-completion/000-orchestrator.md
 ```
 
 **Run specific prompts (no deps, all parallel):**
 ```
-/founder-mode:orchestrate 003-01,003-02,003-03 --model codex
+/fm:orchestrate 003-01,003-02,003-03 --model codex
 ```
 
 **Run pending prompts only:**
 ```
-/founder-mode:orchestrate prompts/phase-completion/000-orchestrator.md --pending-only
+/fm:orchestrate prompts/phase-completion/000-orchestrator.md --pending-only
 ```
 
 **Run in background with worktrees:**
 ```
-/founder-mode:orchestrate 003-01,003-02 --model codex --background --worktree
+/fm:orchestrate 003-01,003-02 --model codex --background --worktree
 ```
 
 ## Error Handling

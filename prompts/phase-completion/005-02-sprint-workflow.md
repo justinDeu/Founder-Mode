@@ -2,7 +2,7 @@
 
 ## Objective
 
-Implement the `/founder-mode:run-sprint` command that automates sprint planning and execution.
+Implement the `/fm:run-sprint` command that automates sprint planning and execution.
 
 ## Prerequisites
 
@@ -251,7 +251,7 @@ Would execute:
 2. Spawn 3 parallel tasks (wave 1+2)
 3. Create 4 PRs
 
-To execute: /founder-mode:run-sprint
+To execute: /fm:run-sprint
 ```
 Exit without executing.
 
@@ -281,7 +281,7 @@ Use parallel execution infrastructure:
 
 ```
 Task(
-  prompt: "/founder-mode:fix-issues {issue_numbers}
+  prompt: "/fm:fix-issues {issue_numbers}
 
   Sprint: {sprint_name}
   Max parallel: {parallel_limit}
@@ -381,7 +381,7 @@ Failed Issues:
 Next Steps:
 1. Review PRs for merge
 2. Debug failed issues manually
-3. Run /founder-mode:run-sprint --filter "label:sprint-next"
+3. Run /fm:run-sprint --filter "label:sprint-next"
 ```
 
 ### Step 10: Update Sprint Tracking
@@ -430,7 +430,7 @@ Create .founder-mode/config.json with sprint settings:
   }
 }
 
-Or specify issues directly: /founder-mode:fix-issues 123 456 789
+Or specify issues directly: /fm:fix-issues 123 456 789
 ```
 
 **No issues found:**

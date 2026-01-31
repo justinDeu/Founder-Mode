@@ -137,7 +137,7 @@ commands/run-prompt.md    - Existing command pattern
 
 - [ ] All 12 prompt files executed successfully
 - [ ] Each prompt's verification steps pass
-- [ ] All commands are callable via /founder-mode:{command}
+- [ ] All commands are callable via /fm:{command}
 - [ ] State management utilities work correctly
 - [ ] Verification agents can be spawned
 - [ ] Integration tests pass (if applicable)

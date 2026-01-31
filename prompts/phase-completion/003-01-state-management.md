@@ -321,7 +321,7 @@ Create `references/state-utilities.md` documenting utility patterns:
 To load project state:
 
 1. Check for .founder-mode/ directory
-2. If missing, error: "Project not initialized. Run /founder-mode:new-project"
+2. If missing, error: "Project not initialized. Run /fm:new-project"
 3. Read STATE.md, parse current position
 4. Read config.json for preferences
 

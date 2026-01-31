@@ -2,7 +2,7 @@
 
 ## Objective
 
-Implement `/founder-mode:plan-phase [N]` command with pre-execution validation loop. Creates executable PLAN.md files that Claude can implement without interpretation.
+Implement `/fm:plan-phase [N]` command with pre-execution validation loop. Creates executable PLAN.md files that Claude can implement without interpretation.
 
 ## Prerequisites
 
@@ -284,7 +284,7 @@ PHASE {N} PLANNED
 Research: {Completed | Used existing | Skipped}
 Verification: {Passed | Passed with override}
 
-Next: /founder-mode:execute-phase {N}
+Next: /fm:execute-phase {N}
 ```
 
 ## Gap Closure Mode (--gaps)

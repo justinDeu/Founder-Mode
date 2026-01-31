@@ -44,7 +44,7 @@ Implemented create-prompt wizard command with clarification flow, three XML temp
 
 2. **Template structure:** Used XML-based templates matching daplug's proven pattern but streamlined for founder-mode's simpler scope.
 
-3. **Skill tool in allowed-tools:** Added `Skill` tool to enable invoking `/founder-mode:run-prompt` directly from post-save actions.
+3. **Skill tool in allowed-tools:** Added `Skill` tool to enable invoking `/fm:run-prompt` directly from post-save actions.
 
 4. **Default to coding template:** When task type is ambiguous, default to coding since most prompts involve code changes.
 

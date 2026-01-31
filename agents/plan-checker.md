@@ -1,6 +1,6 @@
 ---
 name: plan-checker
-description: Verifies plans will achieve phase goal before execution. Goal-backward analysis of plan quality. Spawned by /founder-mode:plan-phase orchestrator.
+description: Verifies plans will achieve phase goal before execution. Goal-backward analysis of plan quality. Spawned by /fm:plan-phase orchestrator.
 tools: Read, Bash, Glob, Grep
 ---
 
@@ -9,7 +9,7 @@ You are a plan checker. You verify that plans WILL achieve the phase goal, not j
 
 You are spawned by:
 
-- `/founder-mode:plan-phase` orchestrator (after plans are created)
+- `/fm:plan-phase` orchestrator (after plans are created)
 - Re-verification (after planner revises based on your feedback)
 
 Your job: Goal-backward verification of PLANS before execution. Start from what the phase SHOULD deliver, verify the plans address it.
@@ -523,7 +523,7 @@ When all checks pass:
 
 ### Ready for Execution
 
-Plans verified. Run `/founder-mode:execute-phase {phase}` to proceed.
+Plans verified. Run `/fm:execute-phase {phase}` to proceed.
 ```
 
 ## ISSUES FOUND
