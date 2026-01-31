@@ -252,6 +252,97 @@ def parse_prompt_list(prompt_list: str, prompts_dir: Path) -> dict:
     }
 
 
+def is_file_path_input(prompt_input: str) -> bool:
+    """Detect if input looks like file paths rather than prompt IDs.
+
+    File paths contain '/' or end with '.md'.
+    Prompt IDs follow pattern like '003-01' with no path separators.
+    """
+    items = [p.strip() for p in prompt_input.split(",") if p.strip()]
+    return any("/" in item or item.endswith(".md") for item in items)
+
+
+def extract_prompt_id_from_path(file_path: str) -> str:
+    """Extract prompt ID from a file path.
+
+    Examples:
+        gh-9-test-issue.md -> gh-9
+        003-01-state-management.md -> 003-01
+        some-file.md -> some-file (fallback to stem)
+    """
+    path = Path(file_path)
+    stem = path.stem
+
+    # Try gh-N pattern (github issues)
+    gh_match = re.match(r"^(gh-\d+)", stem)
+    if gh_match:
+        return gh_match.group(1)
+
+    # Try NNN-NN pattern (standard prompts)
+    std_match = re.match(r"^(\d{3}-\d{2})", stem)
+    if std_match:
+        return std_match.group(1)
+
+    # Fallback to full stem
+    return stem
+
+
+def resolve_file_path(file_path: str) -> dict | None:
+    """Resolve a file path directly to prompt metadata.
+
+    Unlike resolve_prompt_path which searches by ID, this uses the path as-is.
+    """
+    path = Path(file_path)
+    if not path.exists():
+        return None
+
+    prompt_id = extract_prompt_id_from_path(file_path)
+
+    # Extract title from filename
+    stem = path.stem
+    # Remove the ID prefix to get the title part
+    if stem.startswith(prompt_id):
+        title_part = stem[len(prompt_id):].lstrip("-")
+    else:
+        title_part = stem
+    title = title_part.replace("-", " ").title() or prompt_id
+
+    return {
+        "id": prompt_id,
+        "path": str(path.absolute()),
+        "filename": path.name,
+        "title": title
+    }
+
+
+def parse_file_path_list(prompt_list: str) -> dict:
+    """Parse comma-separated file paths (no dependencies).
+
+    Similar to parse_prompt_list but uses paths directly instead of ID resolution.
+    """
+    paths = [p.strip() for p in prompt_list.split(",") if p.strip()]
+
+    prompts = {}
+    for file_path in paths:
+        resolved = resolve_file_path(file_path)
+        if resolved:
+            prompt_id = resolved["id"]
+            prompts[prompt_id] = resolved
+            prompts[prompt_id]["completed"] = False
+            prompts[prompt_id]["dependencies"] = []
+
+    # All prompts in single wave (no deps)
+    waves = [list(prompts.keys())] if prompts else []
+
+    return {
+        "orchestrator": None,
+        "dependencies": {pid: [] for pid in prompts.keys()},
+        "waves": waves,
+        "prompts": prompts,
+        "state": {}
+    }
+
+
 def main():
     parser = argparse.ArgumentParser(description="Parse orchestrator files")
     parser.add_argument("input", help="Orchestrator file path or comma-separated prompt list")
@@ -268,8 +359,11 @@ def main():
     if input_path.exists() and input_path.suffix == ".md":
         # Parse orchestrator file
         result = parse_orchestrator(input_path, prompts_dir)
+    elif is_file_path_input(args.input):
+        # Input contains file paths - use them directly
+        result = parse_file_path_list(args.input)
     else:
-        # Treat as comma-separated list
+        # Treat as comma-separated prompt IDs
         result = parse_prompt_list(args.input, prompts_dir)
 
     # Filter to pending only if requested
