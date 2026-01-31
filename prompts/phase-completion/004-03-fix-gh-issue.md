@@ -353,11 +353,24 @@ When multiple issue numbers provided:
 /founder-mode:fix-gh-issue 123 456 789
 ```
 
-**For 2-3 related issues:**
-Fix sequentially in same branch, create single PR referencing all.
+**Step 1: Dependency Analysis (before execution)**
+Analyze issues to determine conceptual dependencies. Dependency means one issue's solution requires or builds upon another's changes. File overlap from parallel development is NOT a dependency.
 
-**For 3+ unrelated issues:**
-Suggest using `/founder-mode:fix-issues` for parallel execution.
+Present analysis and proposed execution plan to user for verification. User can confirm, mark as independent, or reverse the dependency direction.
+
+**Default behavior (independent issues):**
+Create separate worktree per issue, work in parallel, create separate PR per issue.
+
+Never combine issues into a single worktree or PR without explicit user confirmation.
+
+**For dependent issues (analysis verified by user):**
+After user verifies dependency analysis and execution plan:
+- Work in parallel worktrees with intelligent merge timing
+- Monitor upstream issue for merge-ready state (substantive commits, tests passing)
+- Merge into downstream worktree when upstream reaches a stable point
+- Downstream agent restarts with updated context after merge
+- If conflicts occur, pause and surface to user
+- Create separate PRs with dependency notes
 
 ## Error Handling
 

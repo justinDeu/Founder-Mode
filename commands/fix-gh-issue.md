@@ -26,54 +26,6 @@ Parse from $ARGUMENTS:
 - `--draft`: Create draft PR
 - `--model`: Model to use. Omit or use `?` to select interactively.
 
-## Composition Pattern
-
-This command composes first-principle commands:
-
-```
-/fm:fix-gh-issue 123 456
-         │
-         ▼
-┌─────────────────────────────────────────────────────────┐
-│  Step 1: Fetch Issues (gh CLI)                          │
-│  gh issue view 123 --json title,body,labels             │
-│  gh issue view 456 --json title,body,labels             │
-└─────────────────────────────────────────────────────────┘
-         │
-         ▼
-┌─────────────────────────────────────────────────────────┐
-│  Step 2: Generate Prompts (inline)                      │
-│  Create prompt files in .founder-mode/prompts/gh-issues │
-│  → gh-123-{slug}.md                                     │
-│  → gh-456-{slug}.md                                     │
-└─────────────────────────────────────────────────────────┘
-         │
-         ▼
-┌─────────────────────────────────────────────────────────┐
-│  Step 3: Model Selection (MANDATORY)                    │
-│  AskUserQuestion: "Which model for execution?"          │
-└─────────────────────────────────────────────────────────┘
-         │
-         ▼
-┌─────────────────────────────────────────────────────────┐
-│  Step 4: Execute via Orchestration                      │
-│                                                         │
-│  Single issue:                                          │
-│    Skill(skill: "run-prompt", args: "... --worktree")   │
-│                                                         │
-│  Multiple issues:                                       │
-│    Skill(skill: "orchestrate", args: "... --worktree")  │
-└─────────────────────────────────────────────────────────┘
-         │
-         ▼
-┌─────────────────────────────────────────────────────────┐
-│  Step 5: Create PRs (gh CLI)                            │
-│  For each completed worktree:                           │
-│    git push -u origin {branch}                          │
-│    gh pr create --title "Fix: {issue title}"            │
-└─────────────────────────────────────────────────────────┘
-```
-
 ## Process
 
 ### Step 1: Fetch Issue(s)
@@ -104,7 +56,87 @@ URL: {url}
 
 Store parsed issues in memory for prompt generation.
 
-### Step 2: Generate Prompts
+### Step 2: Dependency Analysis (multiple issues only)
+
+Skip this step for single issues.
+
+**Analyze the issues to determine dependencies:**
+
+Read each issue's title, body, and scope of work. Determine if any issue conceptually depends on another:
+- Does issue B's solution require changes that issue A would introduce?
+- Does issue B build upon functionality that issue A creates?
+- Is there a logical ordering where one must come before the other?
+
+<important>
+Dependency means conceptual relationship: one issue's solution requires or builds upon another's changes.
+
+Dependency does NOT mean issues happen to touch the same files. File overlap from parallel development is not a dependency. That's just a merge conflict to resolve later if it occurs.
+</important>
+
+**If no dependencies found:**
+
+Present analysis and proceed:
+
+```
+Dependency Analysis
+===================
+
+Issue #123: {title}
+Issue #456: {title}
+
+Analysis: These issues are independent. They address separate concerns
+and neither requires changes from the other.
+
+Execution Plan: Parallel worktrees, separate PRs.
+```
+
+**If dependencies found:**
+
+Present the analysis and proposed execution plan for user verification:
+
+```
+Dependency Analysis
+===================
+
+Issue #123: {title}
+Issue #456: {title}
+
+Analysis: Issue #456 depends on #123.
+Reason: {explain why - e.g., "#456 adds validation to the auth flow that #123 creates"}
+
+Proposed Execution Plan:
+
+Phase 1: Issue #123 (upstream)
+  → Worktree: gh-123-{slug}
+  → Creates the foundation needed by #456
+
+Phase 2: Issue #456 (downstream)
+  → Worktree: gh-456-{slug}
+  → Starts in parallel, merges #123 when ready
+  → Merge trigger: #123 has substantive commits + tests passing
+
+Separate PRs will be created for each issue.
+```
+
+Then ask user to verify:
+
+```
+AskUserQuestion(
+  questions: [{
+    question: "Does this dependency analysis look correct?",
+    header: "Verify",
+    options: [
+      { label: "Correct", description: "Proceed with this execution plan" },
+      { label: "Actually independent", description: "No dependency, run fully in parallel" },
+      { label: "Reverse dependency", description: "The other issue should be upstream" }
+    ]
+  }]
+)
+```
+
+Adjust execution plan based on user feedback.
+
+### Step 3: Generate Prompts
 
 For each issue, generate a prompt file. Do NOT call `/fm:create-prompt` (too heavyweight for issue context). Generate inline using this template:
 
@@ -183,7 +215,7 @@ Generated Prompts
 Saved to: .founder-mode/prompts/gh-issues/
 ```
 
-### Step 3: Model Selection (MANDATORY)
+### Step 4: Model Selection (MANDATORY)
 
 <critical>
 ALWAYS ask the user to select a model before execution. This step is MANDATORY.
@@ -209,7 +241,7 @@ AskUserQuestion(
 
 Wait for user selection before proceeding.
 
-### Step 4: Execute via Orchestration
+### Step 5: Execute via Orchestration
 
 Route based on issue count:
 
@@ -234,7 +266,12 @@ Wait for completion and collect result.
 </single_issue>
 
 <multiple_issues>
-**Multiple issues → orchestrate**
+**Multiple issues → Always separate worktrees**
+
+<critical>
+Each issue ALWAYS gets its own worktree and its own PR by default.
+Never combine issues into a single worktree or PR without explicit user confirmation.
+</critical>
 
 Build comma-separated prompt list and invoke orchestrate:
 
@@ -250,7 +287,7 @@ Skill(
 ```
 
 The orchestrate command handles:
-- Wave calculation (all prompts in single wave since no dependencies)
+- One worktree per issue (always isolated)
 - Parallel execution for non-Claude models
 - Spawning `readonly-log-watcher` monitors for background executions
 - Progress reporting per wave
@@ -263,9 +300,61 @@ The orchestrate command handles:
 - User sees wave completion reports
 
 Wait for orchestration to complete and collect all results.
+
+**Dependent issues workflow:**
+
+<important>
+Dependencies are determined by analyzing the issues in Step 2, then verified by the user.
+
+A dependency means issues are conceptually related: one issue's solution requires or builds upon another's changes. File overlap from parallel development is NOT a dependency.
+</important>
+
+When analysis determines issues have dependencies (e.g., issue B requires changes from issue A):
+
+1. **Analysis verified:** Dependency analysis presented in Step 2, user verified the execution plan
+2. **Parallel start:** Both issues begin in separate worktrees simultaneously
+3. **Merge timing:** Monitor upstream issue (A) for merge-ready state:
+   - Core implementation committed (not just scaffolding)
+   - Tests passing for the implemented portion
+   - No uncommitted changes blocking the merge
+4. **Merge and continue:** When A reaches merge-ready state, merge into B's worktree and resume B's agent
+5. **Separate PRs:** Create PRs with dependency notes
+
+**Merge-ready detection:**
+
+The orchestrator monitors each issue's worktree for merge-ready signals:
+```bash
+# Check if issue A has substantive commits beyond initial setup
+COMMITS=$(git -C "$WORKTREE_A" log --oneline main..HEAD | wc -l)
+TESTS_PASS=$(git -C "$WORKTREE_A" diff --quiet && run_tests_in_worktree "$WORKTREE_A")
+
+if [ "$COMMITS" -gt 0 ] && [ "$TESTS_PASS" = "true" ]; then
+  # A is merge-ready, trigger merge into B
+  git -C "$WORKTREE_B" merge gh-{A-number}-{slug}
+fi
+```
+
+**Sub-agent coordination:**
+
+For dependent issues with sub-agents:
+1. **Decompose prompts:** Split each issue into phases if needed (setup, core impl, integration)
+2. **Phase-based merging:** Merge after upstream completes a phase, not necessarily the entire issue
+3. **Agent restart:** After merge, the downstream agent may need to restart with updated context:
+   - Re-read affected files to see upstream changes
+   - Adjust implementation approach if upstream introduced different patterns
+   - Continue from where it left off, not from scratch
+4. **Conflict handling:** If merge conflicts occur, pause downstream agent and surface to user
+
+```bash
+# In issue B's worktree, after A reaches merge-ready:
+git merge gh-{A-number}-{slug}  # or git rebase
+# Continue with B's implementation
+```
+
+Note: Since worktrees share the same repository, local branches are directly accessible without fetching from origin.
 </multiple_issues>
 
-### Step 5: Collect Results
+### Step 6: Collect Results
 
 After execution completes, collect results from each issue's worktree:
 
@@ -301,7 +390,7 @@ If any failed, offer retry:
 3. Abort
 ```
 
-### Step 6: Create PRs (unless --no-pr)
+### Step 7: Create PRs (unless --no-pr)
 
 For each successful issue worktree:
 
@@ -336,7 +425,7 @@ EOF
 
 Capture PR URL for each issue.
 
-### Step 7: Report Completion
+### Step 8: Report Completion
 
 ```
 GitHub Issues Fixed
@@ -425,11 +514,17 @@ Manual creation:
 ```
 → Asks for model, generates prompt, runs via run-prompt, creates PR
 
-**Fix multiple issues:**
+**Fix multiple issues (always separate worktrees):**
 ```
 /founder-mode:fix-gh-issue 123 456 789
 ```
-→ Generates 3 prompts, runs via orchestrate (parallel if non-Claude), creates 3 PRs
+→ Creates 3 separate worktrees, generates 3 prompts, runs via orchestrate, creates 3 separate PRs
+
+**Fix dependent issues:**
+```
+/founder-mode:fix-gh-issue 100 101  # where 101 depends on 100
+```
+→ Creates separate worktrees, works in parallel, merges 100 into 101's worktree when ready, creates 2 PRs
 
 **Fix with specific model:**
 ```
