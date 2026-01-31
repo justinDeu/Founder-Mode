@@ -29,7 +29,7 @@ Get the common directory (shared git data location).
 
 ```bash
 get_common_dir() {
-  git rev-parse --git-common-dir 2>/dev/null | sed 's|/\.git$||'
+  git rev-parse --git-common-dir 2>/dev/null | sed 's|/\.bare$||; s|/\.git$||'
 }
 
 # Usage

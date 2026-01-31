@@ -34,7 +34,12 @@ Locate orchestrator.py:
 ```bash
 PLUGIN_ROOT=$(jq -r '.plugins."founder-mode@local"[0].installPath // empty' ~/.claude/plugins/installed_plugins.json 2>/dev/null)
 if [ -z "$PLUGIN_ROOT" ]; then
+    # Works in normal repos and worktrees
     PLUGIN_ROOT=$(git rev-parse --show-toplevel 2>/dev/null)
+fi
+if [ -z "$PLUGIN_ROOT" ]; then
+    # Fallback for bare repo parent setups
+    PLUGIN_ROOT=$(git rev-parse --git-common-dir 2>/dev/null | sed 's|/\.bare$||; s|/\.git$||')
 fi
 ORCHESTRATOR="$PLUGIN_ROOT/scripts/orchestrator.py"
 ```

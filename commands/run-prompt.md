@@ -396,7 +396,12 @@ PLUGIN_ROOT=$(jq -r '.plugins."founder-mode@local"[0].installPath // empty' ~/.c
 
 # Fallback: check if we're in the plugin directory
 if [ -z "$PLUGIN_ROOT" ]; then
+    # Works in normal repos and worktrees
     PLUGIN_ROOT=$(git rev-parse --show-toplevel 2>/dev/null)
+fi
+if [ -z "$PLUGIN_ROOT" ]; then
+    # Fallback for bare repo parent setups
+    PLUGIN_ROOT=$(git rev-parse --git-common-dir 2>/dev/null | sed 's|/\.bare$||; s|/\.git$||')
 fi
 
 EXECUTOR="$PLUGIN_ROOT/scripts/executor.py"
