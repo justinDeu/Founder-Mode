@@ -164,6 +164,16 @@ def get_model_command(model: str, prompt: str) -> tuple[list[str], str | None, b
 
 VERIFICATION_PATTERN = re.compile(r"<verification>(.*?)</verification>", re.DOTALL)
 
+# Two-stage verification markers
+STAGE1_COMPLETE = "SPEC_COMPLIANCE_VERIFIED"
+STAGE2_COMPLETE = "QUALITY_VERIFIED"
+
+# Combined pattern for two-stage mode
+TWO_STAGE_PATTERN = re.compile(
+    r"<verification>(SPEC_COMPLIANCE_VERIFIED|QUALITY_VERIFIED|VERIFICATION_COMPLETE|NEEDS_RETRY:.*?)</verification>",
+    re.DOTALL
+)
+
 
 def get_iteration_log_path(base_dir: Path, prompt_id: str, iteration: int, timestamp: str) -> Path:
     """Generate log path for a specific iteration."""
@@ -261,6 +271,38 @@ def check_verification(log_path: Path) -> tuple[str, str | None]:
     if last_match.startswith("NEEDS_RETRY:"):
         reason = last_match[len("NEEDS_RETRY:"):].strip()
         return "retry", reason
+
+    return "unknown", last_match
+
+
+def check_two_stage_verification(log_path: Path) -> tuple[str, str | None]:
+    """Check log for two-stage verification markers.
+
+    Returns (stage, reason) where stage is:
+    - "stage1_complete": Spec compliance passed, ready for quality check
+    - "stage2_complete": Both stages passed
+    - "stage1_retry": Stage 1 needs retry
+    - "stage2_retry": Stage 2 needs retry
+    - "no_marker": No verification marker found
+    """
+    content = log_path.read_text()
+    matches = TWO_STAGE_PATTERN.findall(content)
+
+    if not matches:
+        return "no_marker", None
+
+    last_match = matches[-1].strip()
+
+    if last_match == STAGE2_COMPLETE:
+        return "stage2_complete", None
+    if last_match == STAGE1_COMPLETE:
+        return "stage1_complete", None
+    if last_match.startswith("NEEDS_RETRY:"):
+        reason = last_match[len("NEEDS_RETRY:"):].strip()
+        # Determine which stage failed based on context
+        if STAGE1_COMPLETE in content:
+            return "stage2_retry", reason
+        return "stage1_retry", reason
 
     return "unknown", last_match
 
