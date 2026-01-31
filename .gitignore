@@ -2,6 +2,10 @@
 .founder-mode/logs/
 !.founder-mode/logs/.gitkeep
 
+# Prompts (user-specific, not tracked)
+prompts/
+.founder-mode/prompts/
+
 # Worktrees
 .worktrees/
 
