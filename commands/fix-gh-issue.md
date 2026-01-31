@@ -1,21 +1,20 @@
 ---
 name: founder-mode:fix-gh-issue
 description: Fix a GitHub issue end-to-end from issue to PR
-argument-hint: "<issue-number> [--no-worktree] [--no-pr] [--draft]"
+argument-hint: "<issue-number> [--no-worktree] [--no-pr] [--draft] [--model ?|claude|codex|...]"
 allowed-tools:
   - Read
   - Write
-  - Edit
   - Bash
   - Glob
   - Grep
-  - Task
+  - Skill
   - AskUserQuestion
 ---
 
 # Fix GitHub Issue
 
-Complete workflow: fetch issue → analyze → fix → test → PR.
+Compose first-principle commands to fix GitHub issues. Fetches issues, generates prompts, delegates execution to `/fm:run-prompt` or `/fm:orchestrate`, then creates PRs.
 
 ## Arguments
 
@@ -25,219 +24,290 @@ Parse from $ARGUMENTS:
 - `--branch`: Custom branch name (default: uses github naming template)
 - `--no-pr`: Skip PR creation, just commit
 - `--draft`: Create draft PR
+- `--model`: Model to use. Omit or use `?` to select interactively.
+
+## Composition Pattern
+
+This command composes first-principle commands:
+
+```
+/fm:fix-gh-issue 123 456
+         │
+         ▼
+┌─────────────────────────────────────────────────────────┐
+│  Step 1: Fetch Issues (gh CLI)                          │
+│  gh issue view 123 --json title,body,labels             │
+│  gh issue view 456 --json title,body,labels             │
+└─────────────────────────────────────────────────────────┘
+         │
+         ▼
+┌─────────────────────────────────────────────────────────┐
+│  Step 2: Generate Prompts (inline)                      │
+│  Create prompt files in .founder-mode/prompts/gh-issues │
+│  → gh-123-{slug}.md                                     │
+│  → gh-456-{slug}.md                                     │
+└─────────────────────────────────────────────────────────┘
+         │
+         ▼
+┌─────────────────────────────────────────────────────────┐
+│  Step 3: Model Selection (MANDATORY)                    │
+│  AskUserQuestion: "Which model for execution?"          │
+└─────────────────────────────────────────────────────────┘
+         │
+         ▼
+┌─────────────────────────────────────────────────────────┐
+│  Step 4: Execute via Orchestration                      │
+│                                                         │
+│  Single issue:                                          │
+│    Skill(skill: "run-prompt", args: "... --worktree")   │
+│                                                         │
+│  Multiple issues:                                       │
+│    Skill(skill: "orchestrate", args: "... --worktree")  │
+└─────────────────────────────────────────────────────────┘
+         │
+         ▼
+┌─────────────────────────────────────────────────────────┐
+│  Step 5: Create PRs (gh CLI)                            │
+│  For each completed worktree:                           │
+│    git push -u origin {branch}                          │
+│    gh pr create --title "Fix: {issue title}"            │
+└─────────────────────────────────────────────────────────┘
+```
 
 ## Process
 
-### Step 1: Fetch Issue
+### Step 1: Fetch Issue(s)
+
+For each issue number:
 
 ```bash
 # Fetch issue details
-ISSUE=$(gh issue view $NUMBER --json title,body,labels,comments)
+ISSUE=$(gh issue view $NUMBER --json title,body,labels,comments,url)
 
 # Parse fields
 TITLE=$(echo "$ISSUE" | jq -r '.title')
 BODY=$(echo "$ISSUE" | jq -r '.body')
 LABELS=$(echo "$ISSUE" | jq -r '.labels[].name' | tr '\n' ', ')
+URL=$(echo "$ISSUE" | jq -r '.url')
 ```
 
-**Display issue summary:**
+Display issue summary:
 ```
-Fixing Issue #{number}
+Fetched Issue #{number}
 
 Title: {title}
 Labels: {labels}
-Type: {bug|feature inferred from labels}
+URL: {url}
 
-{body preview, first 500 chars}
+{body preview, first 300 chars}
 ```
 
-### Step 2: Analyze Issue
+Store parsed issues in memory for prompt generation.
 
-Parse issue to understand:
-- **Reproduction steps**: For bugs, extract steps from body
-- **Requirements**: For features, extract what's needed
-- **Affected areas**: Files, components mentioned
-- **Acceptance criteria**: What success looks like
+### Step 2: Generate Prompts
 
-**For bugs:**
-```bash
-# Look for common patterns in issue body
-REPRO_STEPS=$(echo "$BODY" | grep -A 20 -i "steps to reproduce\|repro\|how to reproduce")
-EXPECTED=$(echo "$BODY" | grep -A 5 -i "expected\|should")
-ACTUAL=$(echo "$BODY" | grep -A 5 -i "actual\|instead\|but")
+For each issue, generate a prompt file. Do NOT call `/fm:create-prompt` (too heavyweight for issue context). Generate inline using this template:
+
+<issue_prompt_template>
+```markdown
+# Fix GitHub Issue #{number}
+
+<objective>
+Fix issue #{number}: {title}
+
+{issue body}
+</objective>
+
+<context>
+Repository: {repo from git remote}
+Issue URL: {url}
+Labels: {labels}
+Type: {bug|feature|enhancement inferred from labels}
+</context>
+
+<requirements>
+{Requirements parsed from issue body:}
+{For bugs: reproduction steps, expected vs actual behavior}
+{For features: what needs to be built}
+{For refactors: what needs to change}
+</requirements>
+
+<implementation>
+1. Search codebase for files related to issue
+2. Analyze affected components
+3. Implement the fix/feature
+4. Add or update tests to cover the change
+5. Verify tests pass
+6. Verify lint checks pass
+</implementation>
+
+<output>
+On completion, create a commit:
+- Message format: fix: {issue title}\n\nFixes #{number}\n\n- {change 1}\n- {change 2}
+- Stage only relevant files (not git add -A)
+</output>
+
+<verification>
+Before declaring complete:
+- [ ] Issue requirements addressed
+- [ ] Tests pass (run test command)
+- [ ] Lint passes (run lint command)
+- [ ] Changes committed with proper message
+</verification>
 ```
+</issue_prompt_template>
 
-**Determine scope:**
-- Single file fix: Simple, proceed directly
-- Multi-file fix: Create mini-plan
-
-### Step 3: Create Worktree (default, skip with --no-worktree)
-
-See `references/worktree-management.md` for full details.
-
-**Step 3a: Detect Location**
+Save prompts to `.founder-mode/prompts/gh-issues/`:
 
 ```bash
-COMMON_DIR=$(git rev-parse --git-common-dir | sed 's|/\.git$||')
-CURRENT_DIR=$(pwd)
-```
+mkdir -p .founder-mode/prompts/gh-issues
 
-**Step 3b: Read Config**
-
-Read from founder_mode_config:
-- `worktree_dir` (default: `./`)
-- `worktree_naming.github` (default: `gh-{number}-{slug}`)
-
-**Step 3c: Generate Name**
-
-```bash
-# Generate slug from issue title
+# Generate slug from title
 SLUG=$(echo "$TITLE" | tr '[:upper:]' '[:lower:]' | sed 's/[^a-z0-9]/ /g' | \
   tr ' ' '\n' | grep -vE '^(a|an|the|in|on|at|to|for|of)$' | head -5 | \
   tr '\n' '-' | sed 's/--*/-/g' | sed 's/-$//' | cut -c1-30)
 
-# Apply naming template
-WORKTREE_NAME="gh-${NUMBER}-${SLUG}"
+PROMPT_FILE=".founder-mode/prompts/gh-issues/gh-${NUMBER}-${SLUG}.md"
 ```
 
-**Step 3d: Compute Path**
+Write the generated prompt content to `$PROMPT_FILE`.
 
-```bash
-case "$WORKTREE_DIR_CONFIG" in
-  /*|~*) WORKTREE_BASE="${WORKTREE_DIR_CONFIG/#\~/$HOME}" ;;
-  *)     WORKTREE_BASE="$COMMON_DIR/$WORKTREE_DIR_CONFIG" ;;
-esac
+Report generation:
+```
+Generated Prompts
+=================
 
-WORKTREE_PATH="$WORKTREE_BASE/$WORKTREE_NAME"
+{For each issue:}
+- gh-{number}-{slug}.md → Issue #{number}: {title (truncated to 50 chars)}
+
+Saved to: .founder-mode/prompts/gh-issues/
 ```
 
-**Step 3e: Check Location and Confirm**
+### Step 3: Model Selection (MANDATORY)
 
-If `CURRENT_DIR != COMMON_DIR` (user is in a worktree), ask for confirmation:
+<critical>
+ALWAYS ask the user to select a model before execution. This step is MANDATORY.
+The only exception is when `--model` is explicitly provided in the arguments.
+</critical>
+
+If no `--model` specified (or `--model ?`):
 
 ```
 AskUserQuestion(
   questions: [{
-    question: "You're in worktree '{current_worktree}'. Create new worktree at {WORKTREE_PATH}?",
-    header: "Worktree Path",
+    question: "Which model should execute these prompts?",
+    header: "Model",
     options: [
-      { label: "Yes, create there", description: "New worktree at {path}" },
-      { label: "Change location", description: "Specify a different path" },
-      { label: "Cancel", description: "Don't create a worktree" }
+      { label: "claude", description: "Claude in current session (Recommended)" },
+      { label: "codex", description: "OpenAI gpt-5.2-codex via codex CLI" },
+      { label: "gemini", description: "Gemini 3 Flash via gemini CLI" },
+      { label: "claude-zai", description: "Claude CLI with Z.AI backend" }
     ]
   }]
 )
 ```
 
-**Step 3f: Create Worktree**
+Wait for user selection before proceeding.
+
+### Step 4: Execute via Orchestration
+
+Route based on issue count:
+
+<single_issue>
+**Single issue → run-prompt**
+
+Invoke run-prompt skill with generated prompt:
+
+```
+Skill(
+  skill: "run-prompt",
+  args: "{prompt_file} --model {selected_model} {--worktree unless --no-worktree}"
+)
+```
+
+The run-prompt command handles:
+- Worktree creation (with proper naming from config)
+- Claude execution (via Task subagent) or non-Claude (via executor.py)
+- Result collection (COMPLETION.md or executor output)
+
+Wait for completion and collect result.
+</single_issue>
+
+<multiple_issues>
+**Multiple issues → orchestrate**
+
+Build comma-separated prompt list and invoke orchestrate:
 
 ```bash
-mkdir -p "$(dirname "$WORKTREE_PATH")"
+PROMPT_LIST=$(ls .founder-mode/prompts/gh-issues/gh-*.md | tr '\n' ',' | sed 's/,$//')
+```
 
-if git branch --list "$WORKTREE_NAME" | grep -q .; then
-    git worktree add "$WORKTREE_PATH" "$WORKTREE_NAME"
-else
-    git worktree add "$WORKTREE_PATH" -b "$WORKTREE_NAME" main
+```
+Skill(
+  skill: "orchestrate",
+  args: "{prompt_list} --model {selected_model} {--worktree unless --no-worktree}"
+)
+```
+
+The orchestrate command handles:
+- Wave calculation (all prompts in single wave since no dependencies)
+- Parallel execution for non-Claude models
+- Spawning `readonly-log-watcher` monitors for background executions
+- Progress reporting per wave
+- Result collection
+
+**Monitoring happens automatically:**
+- Orchestrate spawns `readonly-log-watcher` agents for background non-Claude executions
+- Monitors report progress every 30 seconds
+- Stall detection at 10/20/30 minute thresholds
+- User sees wave completion reports
+
+Wait for orchestration to complete and collect all results.
+</multiple_issues>
+
+### Step 5: Collect Results
+
+After execution completes, collect results from each issue's worktree:
+
+```bash
+# For each issue
+WORKTREE_PATH=$(git worktree list | grep "gh-${NUMBER}" | awk '{print $1}')
+
+if [ -f "$WORKTREE_PATH/COMPLETION.md" ]; then
+    STATUS=$(grep "Status:" "$WORKTREE_PATH/COMPLETION.md" | sed 's/.*Status: //')
+    SUMMARY=$(grep -A 5 "## Summary" "$WORKTREE_PATH/COMPLETION.md" | tail -n +2)
 fi
+```
 
-# Switch context
+Report results:
+```
+Execution Results
+=================
+
+{For each issue:}
+Issue #{number}: {STATUS}
+  Worktree: {worktree_path}
+  Branch: {branch_name}
+  {Summary snippet}
+
+Overall: {success_count}/{total_count} succeeded
+```
+
+If any failed, offer retry:
+```
+{N} issue(s) failed. Options:
+1. Retry failed issues
+2. Continue to PR creation for successful ones
+3. Abort
+```
+
+### Step 6: Create PRs (unless --no-pr)
+
+For each successful issue worktree:
+
+```bash
 cd "$WORKTREE_PATH"
-```
 
-### Step 4: Codebase Analysis
-
-Using issue content as guide:
-
-```bash
-# Search for error messages mentioned in issue
-grep -r "error message from issue" src/
-
-# Search for function/component names mentioned
-grep -r "mentioned_function" src/
-
-# Find related test files
-ls **/test*${component}* **/*${component}*test*
-```
-
-Read files that will need modification.
-
-### Step 5: Plan Fix
-
-**For simple fixes (single file, obvious change):**
-Skip formal planning, proceed to fix.
-
-**For complex fixes:**
-Create lightweight plan:
-- Files to modify
-- Changes to make
-- Verification steps
-
-### Step 6: Execute Fix
-
-Make code changes using Edit/Write tools.
-
-**Self-healing retry (Ralph Wiggums pattern):**
-If execution fails:
-1. Check error output
-2. Diagnose issue
-3. Retry with fix
-4. Max 3 attempts
-
-### Step 7: Add/Update Tests
-
-```bash
-# Check if test file exists
-TEST_FILE=$(find . -name "*${component}*.test.*" -o -name "*${component}*.spec.*" | head -1)
-
-if [ -n "$TEST_FILE" ]; then
-  # Update existing tests
-  echo "Updating: $TEST_FILE"
-else
-  # Create new test file
-  echo "Creating test for: $component"
-fi
-```
-
-Add test cases that:
-- Cover the bug fix (regression test)
-- Or cover the new feature
-
-### Step 8: Verify Fix
-
-```bash
-# Run tests
-npm test || pytest || go test ./...
-
-# Run linting
-npm run lint || ruff check . || go vet ./...
-
-# Run build
-npm run build || python -m build || go build ./...
-```
-
-**If tests fail:**
-- Show failure output
-- Offer retry or abort
-- Max 3 fix attempts
-
-### Step 9: Commit
-
-```bash
-git add .
-git commit -m "$(cat <<'EOF'
-fix: {issue title}
-
-Fixes #{number}
-
-- {change 1}
-- {change 2}
-EOF
-)"
-```
-
-### Step 10: Create PR (unless --no-pr)
-
-```bash
 # Push branch
 git push -u origin "$BRANCH"
 
@@ -251,59 +321,54 @@ gh pr create $PR_FLAGS \
 ## Summary
 Fixes #{number}
 
-{brief description of fix}
+{summary from COMPLETION.md}
 
 ## Changes
-- {change 1}
-- {change 2}
-
-## Testing
-- {how it was tested}
+{files changed from git diff --stat}
 
 ## Verification
 - [x] Tests pass
 - [x] Lint clean
-- [x] Build successful
 EOF
 )" \
   --assignee @me
 ```
 
-### Step 11: Report Completion
+Capture PR URL for each issue.
+
+### Step 7: Report Completion
 
 ```
-Issue #{number} fixed!
+GitHub Issues Fixed
+===================
 
-Branch: {branch}
-PR: {pr_url}
+{For each issue:}
+Issue #{number}: {title}
+  Status: {SUCCESS|FAILED}
+  Branch: {branch}
+  PR: {pr_url}
+  Worktree: {worktree_path}
 
-Changes made:
-- {file1}: {description}
-- {file2}: {description}
+Summary:
+- Issues processed: {total}
+- PRs created: {pr_count}
+- Failed: {failed_count}
 
-Verification:
-- [x] Tests pass ({N} passed, 0 failed)
-- [x] Lint clean
-- [x] Build successful
-
-{If worktree used:}
-Worktree: {worktree_path}
-To clean up: git worktree remove {worktree_path}
+{If worktrees used:}
+Clean up worktrees when done:
+  git worktree remove {path1}
+  git worktree remove {path2}
 ```
 
-## Multiple Issues
+## Worktree Management
 
-When multiple issue numbers provided:
+See `references/worktree-management.md` for full details.
 
-```
-/founder-mode:fix-gh-issue 123 456 789
-```
+Worktree naming uses the `github` template from config:
+- Default: `gh-{number}-{slug}`
+- Example: `gh-123-fix-login-redirect`
 
-**For 2-3 related issues:**
-Fix sequentially in same branch, create single PR referencing all.
-
-**For 3+ unrelated issues:**
-Suggest using `/founder-mode:fix-issues` for parallel execution.
+Worktree location from `worktree_dir` config (default: `./` relative to git common dir).
 
 ## Error Handling
 
@@ -317,47 +382,79 @@ Check:
 - gh CLI is authenticated
 ```
 
-**Worktree conflict:**
+**Prompt generation failed:**
 ```
-Worktree already exists for issue #{number}.
+Failed to generate prompt for issue #{number}.
+
+Error: {error}
+
+Try fetching the issue manually:
+  gh issue view {number}
+```
+
+**Execution failed:**
+```
+Execution failed for issue #{number}.
+
+Status: {error from result}
+Log: {log path if available}
 
 Options:
-1. Remove existing: git worktree remove {path}
-2. Use existing: cd {path}
-3. Use different branch: --branch fix/issue-{number}-v2
+1. Retry this issue
+2. Skip and continue
+3. Abort
 ```
 
-**Tests fail after fix:**
+**PR creation failed:**
 ```
-Tests failing after fix attempt.
-
-Failures:
-{test output}
-
-Options:
-1. Retry fix - Attempt another fix
-2. Skip tests - Commit anyway (--no-verify)
-3. Abort - Don't commit
-```
-
-**PR creation fails:**
-```
-PR creation failed.
+PR creation failed for issue #{number}.
 
 Error: {error}
 
 Manual creation:
+  cd {worktree_path}
   git push -u origin {branch}
   gh pr create --title "Fix: {title}" --body "Fixes #{number}"
 ```
 
+## Examples
+
+**Fix single issue:**
+```
+/founder-mode:fix-gh-issue 123
+```
+→ Asks for model, generates prompt, runs via run-prompt, creates PR
+
+**Fix multiple issues:**
+```
+/founder-mode:fix-gh-issue 123 456 789
+```
+→ Generates 3 prompts, runs via orchestrate (parallel if non-Claude), creates 3 PRs
+
+**Fix with specific model:**
+```
+/founder-mode:fix-gh-issue 123 --model codex
+```
+→ Skips model selection, uses codex
+
+**Fix without worktree:**
+```
+/founder-mode:fix-gh-issue 123 --no-worktree
+```
+→ Works in current directory instead of isolated worktree
+
+**Fix as draft PR:**
+```
+/founder-mode:fix-gh-issue 123 --draft
+```
+→ Creates draft PR instead of ready-for-review
+
 ## Success Criteria
 
-- [ ] Issue fetched and parsed
-- [ ] Codebase analyzed for relevant files
-- [ ] Fix implemented
-- [ ] Tests added/updated
-- [ ] Verification passed (tests, lint, build)
-- [ ] Committed with proper message
-- [ ] PR created (unless --no-pr)
-- [ ] User shown result with PR URL
+- [ ] Issue(s) fetched and parsed
+- [ ] Prompt(s) generated in .founder-mode/prompts/gh-issues/
+- [ ] User selected model (or provided via --model)
+- [ ] Execution delegated to run-prompt (single) or orchestrate (multiple)
+- [ ] Results collected from worktrees
+- [ ] PR(s) created with proper references
+- [ ] User shown completion summary with PR URLs
