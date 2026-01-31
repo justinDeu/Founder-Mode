@@ -143,7 +143,7 @@ is_worktree() {
 
 # Get main repo path
 get_main_repo() {
-  git rev-parse --git-common-dir | sed 's|/\.git$||'
+  git rev-parse --git-common-dir | sed 's|/\.bare$||; s|/\.git$||'
 }
 
 # Get current worktree name
@@ -160,7 +160,7 @@ list_worktrees() {
 create_worktree() {
   local name="$1"
   local base_branch="${2:-HEAD}"
-  local common_dir=$(git rev-parse --git-common-dir | sed 's|/\.git$||')
+  local common_dir=$(git rev-parse --git-common-dir | sed 's|/\.bare$||; s|/\.git$||')
   local worktree_dir="${3:-$common_dir}"
 
   local path="${worktree_dir}/${name}"
