@@ -160,13 +160,13 @@ Choose (1-3):
 
 <post_save_actions>
 **Option 1 (Run now):**
-Invoke via Skill tool: `/founder-mode:run-prompt ./prompts/{filename}`
+Invoke via Skill tool: `/fm:run-prompt ./prompts/{filename}`
 
 **Option 2 (Edit first):**
-Display: "The prompt is saved at ./prompts/{filename}. Edit it with your preferred editor, then run with `/founder-mode:run-prompt {filename}`"
+Display: "The prompt is saved at ./prompts/{filename}. Edit it with your preferred editor, then run with `/fm:run-prompt {filename}`"
 
 **Option 3 (Save for later):**
-Display: "Prompt saved. Run later with `/founder-mode:run-prompt {filename}`"
+Display: "Prompt saved. Run later with `/fm:run-prompt {filename}`"
 </post_save_actions>
 
 ## Prompt Templates

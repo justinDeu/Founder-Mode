@@ -82,8 +82,8 @@ GitHub Issues ({count} {state}, assigned to {assignee})
      Created: 3 days ago
 
 Commands:
-  /founder-mode:fix-gh-issue 123         Fix issue #123
-  /founder-mode:fix-gh-issue 123 456 789 Fix multiple issues
+  /fm:fix-gh-issue 123         Fix issue #123
+  /fm:fix-gh-issue 123 456 789 Fix multiple issues
 ```
 
 ### Step 6: Handle Errors

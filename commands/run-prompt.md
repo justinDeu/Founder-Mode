@@ -52,7 +52,7 @@ Use for complex prompts where both correctness and quality matter.
 
 Example:
 ```bash
-/founder-mode:run-prompt my-feature --model codex --loop --two-stage
+/fm:run-prompt my-feature --model codex --loop --two-stage
 ```
 
 Result JSON includes:
@@ -81,12 +81,12 @@ When no `--model` is specified (or `--model ?` is used):
 5. Show result
 
 ```
-/founder-mode:run-prompt prompts/fix-bug.md
+/fm:run-prompt prompts/fix-bug.md
 ```
 
 To skip the model selection prompt, specify a model explicitly:
 ```
-/founder-mode:run-prompt prompts/fix-bug.md --model claude
+/fm:run-prompt prompts/fix-bug.md --model claude
 ```
 
 ## Execution Flow
@@ -548,20 +548,20 @@ Other errors:
 
 **Run with Claude (default)**:
 ```
-/founder-mode:run-prompt prompts/001-setup.md
+/fm:run-prompt prompts/001-setup.md
 ```
 
 **Run with Codex**:
 ```
-/founder-mode:run-prompt prompts/001-setup.md --model codex
+/fm:run-prompt prompts/001-setup.md --model codex
 ```
 
 **Run in background with worktree**:
 ```
-/founder-mode:run-prompt prompts/001-setup.md --model codex --background --worktree
+/fm:run-prompt prompts/001-setup.md --model codex --background --worktree
 ```
 
 **Run with custom working directory**:
 ```
-/founder-mode:run-prompt prompts/001-setup.md --cwd /path/to/project
+/fm:run-prompt prompts/001-setup.md --cwd /path/to/project
 ```
