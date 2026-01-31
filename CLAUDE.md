@@ -73,3 +73,12 @@ Execute multiple prompts with dependency management and parallel execution.
 /founder-mode:orchestrate 003-01,003-02,003-03 --model codex
 /founder-mode:orchestrate prompts/000-orchestrator.md --pending-only --background
 ```
+
+## Deviation Handling
+
+During prompt execution, follow the deviation rules in `references/deviation-rules.md`:
+
+- **Rules 1-3:** Auto-fix bugs, critical functionality, and blockers
+- **Rule 4:** Checkpoint for architectural decisions
+
+Always document deviations in output.
