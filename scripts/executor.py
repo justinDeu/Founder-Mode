@@ -334,6 +334,8 @@ def main():
     parser.add_argument("--max-iterations", type=int, default=3, help="Max loop iterations")
     parser.add_argument("--completion-marker", default="VERIFICATION_COMPLETE",
                         help="Marker indicating successful completion")
+    parser.add_argument("--two-stage", action="store_true",
+                        help="Enable two-stage verification (spec compliance + quality)")
 
     args = parser.parse_args()
 
@@ -401,75 +403,176 @@ def main():
     iterations = state["iteration"] if state else 0
     status = "unknown"
     current_prompt = original_prompt
+    stage = "spec"  # For two-stage mode: "spec" or "quality"
+    stages_completed = []  # Track completed stages for result JSON
 
-    while iterations < args.max_iterations:
-        iterations += 1
+    # Two-stage verification mode
+    if args.two_stage and args.loop:
+        while iterations < args.max_iterations:
+            iterations += 1
 
-        # Determine log path for this iteration
-        if args.loop:
+            # Determine log path for this iteration
             iteration_log_path = get_iteration_log_path(log_dir, prompt_id, iterations, execution_timestamp)
             iteration_logs.append(str(iteration_log_path.absolute()))
-        else:
-            iteration_log_path = log_path
 
-        success = run_cli(args.model, current_prompt, cwd, iteration_log_path)
+            if stage == "spec":
+                # Stage 1: Spec compliance
+                stage_prompt = current_prompt + """
 
-        # Append summary to loop log
-        if args.loop:
+## Verification Stage 1: Spec Compliance
+
+After completing the work, verify SPEC COMPLIANCE:
+- Does the output match the requirements?
+- Are all specified features implemented?
+- Do the tests pass?
+
+If spec compliance is verified, output:
+<verification>SPEC_COMPLIANCE_VERIFIED</verification>
+
+If not, output:
+<verification>NEEDS_RETRY: [reason]</verification>
+"""
+            else:
+                # Stage 2: Quality check
+                stage_prompt = current_prompt + """
+
+## Verification Stage 2: Code Quality
+
+Spec compliance is verified. Now check CODE QUALITY:
+- Is the code well-organized?
+- Is error handling complete?
+- Are there any obvious improvements?
+
+If quality is acceptable, output:
+<verification>QUALITY_VERIFIED</verification>
+
+If not, output:
+<verification>NEEDS_RETRY: [reason]</verification>
+"""
+
+            success = run_cli(args.model, stage_prompt, cwd, iteration_log_path)
+
+            # Append summary to loop log
+            with open(loop_log_path, "a") as f:
+                f.write(f"--- Iteration {iterations} (Stage: {stage}) ---\n")
+                f.write(f"Log: {iteration_log_path}\n")
+                f.write(f"Status: {'success' if success else 'cli_error'}\n\n")
+
+            if not success:
+                if state:
+                    update_iteration(state, 1, False, "CLI returned non-zero exit code")
+                    save_state(state)
+                status = "cli_error"
+                break
+
+            verification_status, reason = check_two_stage_verification(iteration_log_path)
+
+            # Update loop log with verification result
+            with open(loop_log_path, "a") as f:
+                f.write(f"Verification: {verification_status}\n")
+                if reason:
+                    f.write(f"Reason: {reason}\n")
+                f.write("\n")
+
+            # Update state with iteration results
+            if state:
+                marker_found = verification_status in ("stage1_complete", "stage2_complete")
+                update_iteration(state, 0, marker_found, reason)
+
+                log_content = iteration_log_path.read_text()
+                next_steps = extract_next_steps(log_content)
+                if next_steps:
+                    state["suggested_next_steps"] = next_steps
+
+                save_state(state)
+
+            if verification_status == "stage2_complete":
+                stages_completed = ["spec", "quality"]
+                status = "success"
+                break
+            if verification_status == "stage1_complete":
+                stages_completed = ["spec"]
+                stage = "quality"  # Proceed to stage 2
+                continue
+            if verification_status in ("stage1_retry", "stage2_retry"):
+                current_prompt = build_retry_prompt(original_prompt, iteration_log_path, reason)
+                continue
+            if verification_status == "no_marker":
+                status = "no_verification_marker"
+                break
+
+            status = f"verification_failed:{verification_status}"
+            break
+
+    # Standard verification loop (non-two-stage)
+    elif args.loop:
+        while iterations < args.max_iterations:
+            iterations += 1
+
+            # Determine log path for this iteration
+            iteration_log_path = get_iteration_log_path(log_dir, prompt_id, iterations, execution_timestamp)
+            iteration_logs.append(str(iteration_log_path.absolute()))
+
+            success = run_cli(args.model, current_prompt, cwd, iteration_log_path)
+
+            # Append summary to loop log
             with open(loop_log_path, "a") as f:
                 f.write(f"--- Iteration {iterations} ---\n")
                 f.write(f"Log: {iteration_log_path}\n")
                 f.write(f"Status: {'success' if success else 'cli_error'}\n\n")
 
-        if not success:
-            # Update state on CLI error
+            if not success:
+                # Update state on CLI error
+                if state:
+                    update_iteration(state, 1, False, "CLI returned non-zero exit code")
+                    save_state(state)
+                status = "cli_error"
+                break
+
+            verification_status, reason = check_verification(iteration_log_path)
+
+            # Update loop log with verification result
+            with open(loop_log_path, "a") as f:
+                f.write(f"Verification: {verification_status}\n")
+                if reason:
+                    f.write(f"Reason: {reason}\n")
+                f.write("\n")
+
+            # Update state with iteration results
             if state:
-                update_iteration(state, 1, False, "CLI returned non-zero exit code")
+                marker_found = verification_status == "complete"
+                update_iteration(state, 0, marker_found, reason)
+
+                # Extract next steps from iteration log
+                log_content = iteration_log_path.read_text()
+                next_steps = extract_next_steps(log_content)
+                if next_steps:
+                    state["suggested_next_steps"] = next_steps
+
                 save_state(state)
-            status = "cli_error"
+
+            if verification_status == "complete":
+                status = "success"
+                break
+
+            if verification_status == "retry" and iterations < args.max_iterations:
+                current_prompt = build_retry_prompt(original_prompt, iteration_log_path, reason)
+                status = "retrying"
+                continue
+
+            if verification_status == "no_marker":
+                status = "no_verification_marker"
+                break
+
+            status = f"verification_failed:{verification_status}"
             break
 
-        if not args.loop:
-            status = "success"
-            break
-
-        verification_status, reason = check_verification(iteration_log_path)
-
-        # Update loop log with verification result
-        with open(loop_log_path, "a") as f:
-            f.write(f"Verification: {verification_status}\n")
-            if reason:
-                f.write(f"Reason: {reason}\n")
-            f.write("\n")
-
-        # Update state with iteration results
-        if state:
-            marker_found = verification_status == "complete"
-            update_iteration(state, 0, marker_found, reason)
-
-            # Extract next steps from iteration log
-            log_content = iteration_log_path.read_text()
-            next_steps = extract_next_steps(log_content)
-            if next_steps:
-                state["suggested_next_steps"] = next_steps
-
-            save_state(state)
-
-        if verification_status == "complete":
-            status = "success"
-            break
-
-        if verification_status == "retry" and iterations < args.max_iterations:
-            current_prompt = build_retry_prompt(original_prompt, iteration_log_path, reason)
-            status = "retrying"
-            continue
-
-        if verification_status == "no_marker":
-            status = "no_verification_marker"
-            break
-
-        status = f"verification_failed:{verification_status}"
-        break
+    # Non-loop mode: single execution
+    else:
+        iteration_log_path = log_path
+        success = run_cli(args.model, current_prompt, cwd, iteration_log_path)
+        iterations = 1
+        status = "success" if success else "cli_error"
 
     # Finalize loop log
     if args.loop:
@@ -496,6 +599,11 @@ def main():
         result["state_file"] = str(get_state_file(cwd, prompt_id).absolute())
     else:
         result["log_path"] = str(log_path.absolute())
+
+    # Add two-stage information if enabled
+    if args.two_stage:
+        result["two_stage"] = True
+        result["stages_completed"] = stages_completed
 
     print(json.dumps(result))
     sys.exit(0 if status == "success" else 1)
