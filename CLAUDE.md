@@ -119,6 +119,33 @@ Execute multiple prompts with dependency management and parallel execution.
 /founder-mode:orchestrate prompts/000-orchestrator.md --pending-only --background
 ```
 
+## Skills
+
+### commit-conventions
+
+Provides conventional commit formatting guidelines. Claude auto-loads this skill when creating commits, staging changes, or finalizing work.
+
+The skill ensures all commits follow the [Conventional Commits](https://www.conventionalcommits.org/en/v1.0.0/) specification:
+
+```
+<type>[optional scope]: <description>
+
+[optional body]
+
+[optional footer(s)]
+```
+
+**Commit Types:** feat, fix, docs, style, refactor, perf, test, build, ci, chore
+
+**Key Guidelines:**
+- Use imperative mood in descriptions
+- Keep descriptions under 72 characters
+- Include body only for complex changes
+- Never stage all files without confirmation
+- Reference issues in footer when applicable
+
+See `skills/commit/SKILL.md` for full details.
+
 ## Deviation Handling
 
 During prompt execution, follow the deviation rules in `references/deviation-rules.md`:
