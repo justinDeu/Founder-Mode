@@ -1,382 +1,357 @@
 #!/usr/bin/env python3
-"""Parse orchestrator files and calculate execution waves."""
+"""Validate orchestrator YAML workflow configs.
+
+This validator checks YAML structure and DAG constraints.
+It does NOT execute workflows or generate execution plans.
+"""
 
 import argparse
-import json
-import re
 import sys
 from pathlib import Path
+from difflib import get_close_matches
 
-
-def parse_dependency_graph(content: str) -> dict[str, list[str]]:
-    """Extract dependency graph from orchestrator markdown.
-
-    Looks for patterns like:
-        003-01 (state-management)
-            |
-            v
-        003-02 (new-project)
-
-    Returns dict mapping prompt_id -> list of dependency prompt_ids
-    """
-    deps: dict[str, list[str]] = {}
-
-    # Find the dependency graph section
-    graph_match = re.search(
-        r"##\s*Dependency Graph\s*```(.*?)```",
-        content,
-        re.DOTALL | re.IGNORECASE
+# Check for PyYAML
+try:
+    import yaml
+except ImportError:
+    print(
+        "ERROR: PyYAML is not installed.\n"
+        "Install it with: pip install pyyaml\n"
+        "Or run: pip install -r requirements.txt",
+        file=sys.stderr
     )
-
-    if not graph_match:
-        return deps
-
-    graph_text = graph_match.group(1)
-
-    # Extract all prompt IDs (pattern: NNN-NN)
-    prompt_ids = re.findall(r"\b(\d{3}-\d{2})\b", graph_text)
-
-    # Initialize all prompts with empty deps
-    for pid in prompt_ids:
-        if pid not in deps:
-            deps[pid] = []
-
-    # Parse arrows to find dependencies
-    # Look for patterns like "003-01\n    |\n    v\n003-02"
-    lines = graph_text.split("\n")
-    current_source = None
-
-    for i, line in enumerate(lines):
-        # Check if line contains a prompt ID
-        match = re.search(r"\b(\d{3}-\d{2})\b", line)
-        if match:
-            pid = match.group(1)
-            if current_source and current_source != pid:
-                # This prompt depends on current_source
-                if pid not in deps:
-                    deps[pid] = []
-                if current_source not in deps[pid]:
-                    deps[pid].append(current_source)
-            current_source = pid
-        elif "|" in line or "v" in line.lower():
-            # Arrow indicator, keep current_source
-            pass
-        elif line.strip() == "":
-            # Empty line might reset context in some formats
-            pass
-
-    return deps
+    sys.exit(1)
 
 
-def parse_execution_order(content: str) -> list[dict]:
-    """Extract execution order from orchestrator markdown.
-
-    Looks for patterns like:
-        ### Wave 1: Foundation
-        1. `003-01-state-management.md` - Description
-        2. `003-02-new-project.md` - Description
-
-    Returns list of {wave: N, prompts: [ids]}
-    """
-    waves = []
-
-    # Find wave sections
-    wave_pattern = re.compile(
-        r"###\s*Wave\s*(\d+)[:\s]*(.*?)\n(.*?)(?=###|\Z)",
-        re.DOTALL | re.IGNORECASE
-    )
-
-    for match in wave_pattern.finditer(content):
-        wave_num = int(match.group(1))
-        wave_name = match.group(2).strip()
-        wave_content = match.group(3)
-
-        # Extract prompt IDs from this wave
-        prompt_ids = re.findall(r"`(\d{3}-\d{2})[^`]*\.md`", wave_content)
-
-        if prompt_ids:
-            waves.append({
-                "wave": wave_num,
-                "name": wave_name,
-                "prompts": prompt_ids
-            })
-
-    return waves
+# Schema constants
+ALLOWED_WORKFLOW_KEYS = {"base", "branch", "on_complete", "prompts"}
+ALLOWED_ON_COMPLETE_KEYS = {"create_pr", "merge_to", "delete_worktree"}
+ALLOWED_PROMPT_KEYS = {"path", "after", "model"}
+ALLOWED_MODELS = {
+    "claude", "codex", "gemini", "zai",
+    "opencode", "opencode-zai", "opencode-codex", "claude-zai"
+}
 
 
-def parse_state_tracking(content: str) -> dict[str, bool]:
-    """Extract completion state from orchestrator.
+class ValidationError:
+    """Collect validation errors with context."""
 
-    Looks for:
-        [x] 003-01-state-management.md
-        [ ] 003-02-new-project.md
+    def __init__(self):
+        self.errors = []
 
-    Returns dict mapping prompt_id -> completed (bool)
-    """
-    state = {}
+    def add(self, message):
+        self.errors.append(message)
 
-    # Match checkbox patterns
-    pattern = re.compile(r"\[([xX ])\]\s*`?(\d{3}-\d{2})[^`\n]*\.md`?")
+    def has_errors(self):
+        return len(self.errors) > 0
 
-    for match in pattern.finditer(content):
-        completed = match.group(1).lower() == "x"
-        prompt_id = match.group(2)
-        state[prompt_id] = completed
+    def print(self):
+        if not self.has_errors():
+            return
 
-    return state
+        print("VALIDATION FAILED:", file=sys.stderr)
+        for error in self.errors:
+            print(f"  - {error}", file=sys.stderr)
 
 
-def calculate_waves(deps: dict[str, list[str]]) -> list[list[str]]:
-    """Group prompts into dependency waves.
+def suggest_correction(field, allowed):
+    """Suggest correction for unknown field using difflib."""
+    matches = get_close_matches(field, allowed, n=1, cutoff=0.6)
+    if matches:
+        return f" (did you mean '{matches[0]}'?)"
+    return ""
 
-    Wave N contains prompts whose dependencies are all in waves < N.
-    """
-    if not deps:
-        return []
 
-    waves = []
-    remaining = set(deps.keys())
-    completed = set()
+def validate_on_complete(on_complete, path, errors):
+    """Validate on_complete section."""
+    if on_complete is None:
+        return
 
-    while remaining:
-        # Find all prompts whose deps are satisfied
-        ready = [p for p in remaining if all(d in completed for d in deps[p])]
+    if not isinstance(on_complete, dict):
+        errors.add(f"{path} must be a map, got {type(on_complete).__name__}")
+        return
 
-        if not ready:
-            # Circular dependency or missing deps
-            raise ValueError(
-                f"Cannot resolve dependencies. Remaining: {remaining}, "
-                f"Completed: {completed}"
+    # Check for unknown keys
+    for key in on_complete:
+        if key not in ALLOWED_ON_COMPLETE_KEYS:
+            allowed_str = ", ".join(sorted(ALLOWED_ON_COMPLETE_KEYS))
+            suggestion = suggest_correction(key, ALLOWED_ON_COMPLETE_KEYS)
+            errors.add(f"Unknown field '{path}.{key}'{suggestion} (allowed: {allowed_str})")
+
+    # Check mutual exclusivity
+    if on_complete.get("create_pr") and on_complete.get("merge_to"):
+        errors.add(
+            f"Cannot specify both 'create_pr' and 'merge_to' in {path}. "
+            "These options are mutually exclusive."
+        )
+
+    # Validate types
+    if "create_pr" in on_complete and not isinstance(on_complete["create_pr"], bool):
+        errors.add(f"{path}.create_pr must be boolean")
+
+    if "merge_to" in on_complete:
+        merge_to = on_complete["merge_to"]
+        if not isinstance(merge_to, str) or not merge_to.strip():
+            errors.add(f"{path}.merge_to must be non-empty string")
+
+    if "delete_worktree" in on_complete and not isinstance(on_complete["delete_worktree"], bool):
+        errors.add(f"{path}.delete_worktree must be boolean")
+
+
+def validate_prompt(prompt_id, prompt, workflow_id, all_prompt_ids, errors):
+    """Validate a single prompt configuration."""
+    prefix = f"workflows.{workflow_id}.prompts.{prompt_id}"
+
+    # Check for unknown keys
+    for key in prompt:
+        if key not in ALLOWED_PROMPT_KEYS:
+            allowed_str = ", ".join(sorted(ALLOWED_PROMPT_KEYS))
+            suggestion = suggest_correction(key, ALLOWED_PROMPT_KEYS)
+            errors.add(f"Unknown field '{prefix}.{key}'{suggestion} (allowed: {allowed_str})")
+
+    # Validate required fields
+    if "path" not in prompt:
+        errors.add(f"{prefix} is missing required field 'path'")
+        return
+
+    # Validate path
+    path = prompt["path"]
+    if not isinstance(path, str) or not path.strip():
+        errors.add(f"{prefix}.path must be non-empty string")
+    else:
+        # Check if file exists (relative to current directory)
+        file_path = Path(path)
+        if not file_path.exists():
+            errors.add(f"Prompt path does not exist: {path}")
+
+    # Validate after
+    if "after" in prompt:
+        after = prompt["after"]
+        if not isinstance(after, list):
+            errors.add(f"{prefix}.after must be a list")
+        else:
+            for dep in after:
+                if not isinstance(dep, str):
+                    errors.add(f"{prefix}.after must contain only strings")
+                elif dep not in all_prompt_ids:
+                    errors.add(
+                        f"Invalid reference in {prefix}.after: '{dep}' not found "
+                        f"in prompts for workflow '{workflow_id}'"
+                    )
+
+    # Validate model
+    if "model" in prompt:
+        model = prompt["model"]
+        if not isinstance(model, str):
+            errors.add(f"{prefix}.model must be a string")
+        elif model not in ALLOWED_MODELS:
+            allowed_str = ", ".join(sorted(ALLOWED_MODELS))
+            errors.add(
+                f"Invalid model '{model}' in {prefix} (allowed: {allowed_str})"
             )
 
-        waves.append(sorted(ready))
-        completed.update(ready)
-        remaining -= set(ready)
 
-    return waves
+def validate_dag(workflow_id, prompts, errors):
+    """Validate DAG constraints: single sink, no cycles, all connected."""
+    prefix = f"workflows.{workflow_id}.prompts"
 
+    if not prompts:
+        errors.add(f"{prefix} cannot be empty")
+        return
 
-def resolve_prompt_path(prompt_id: str, prompts_dir: Path) -> dict | None:
-    """Find the prompt file for a given ID.
+    prompt_ids = set(prompts.keys())
 
-    Searches for files matching pattern: {prompt_id}-*.md
-    """
-    # Search in prompts_dir and subdirectories
-    patterns = [
-        f"{prompt_id}-*.md",
-        f"**/{prompt_id}-*.md"
-    ]
+    # Build dependency graph
+    deps = {pid: set(prompts[pid].get("after", [])) for pid in prompts}
+    # Filter out any invalid deps (already reported in validate_prompt)
+    for pid in deps:
+        deps[pid] = {d for d in deps[pid] if d in prompt_ids}
 
-    for pattern in patterns:
-        matches = list(prompts_dir.glob(pattern))
-        if matches:
-            path = matches[0]
-            # Extract title from filename
-            name = path.stem
-            title_part = name[len(prompt_id):].lstrip("-")
-            title = title_part.replace("-", " ").title()
+    # Build reverse graph (who depends on me)
+    dependents = {pid: set() for pid in prompts}
+    for pid, dep_list in deps.items():
+        for dep in dep_list:
+            dependents[dep].add(pid)
 
-            return {
-                "id": prompt_id,
-                "path": str(path.absolute()),
-                "filename": path.name,
-                "title": title or prompt_id
-            }
+    # Find sinks (nodes with no dependents)
+    sinks = {pid for pid in prompts if not dependents[pid]}
 
-    return None
+    if len(sinks) == 0:
+        errors.add(f"No sink found in {prefix}. Every prompt has a dependent (cycle?).")
+    elif len(sinks) > 1:
+        sinks_str = ", ".join(sorted(sinks))
+        errors.add(
+            f"Multiple sinks found: {{{sinks_str}}}. "
+            f"DAG must converge to single sink."
+        )
 
+    # Check for cycles using DFS
+    def has_cycle(node, visited, rec_stack):
+        visited.add(node)
+        rec_stack.add(node)
 
-def parse_orchestrator(file_path: Path, prompts_dir: Path) -> dict:
-    """Parse an orchestrator file and return execution plan."""
-    content = file_path.read_text()
+        for neighbor in deps.get(node, []):
+            if neighbor not in visited:
+                if has_cycle(neighbor, visited, rec_stack):
+                    return True
+            elif neighbor in rec_stack:
+                return True
 
-    # Parse dependency graph
-    deps = parse_dependency_graph(content)
+        rec_stack.remove(node)
+        return False
 
-    # If no deps found, try to get execution order directly
-    if not deps:
-        waves_from_doc = parse_execution_order(content)
-        if waves_from_doc:
-            # Build deps from wave order
-            all_prior = []
-            for wave_info in waves_from_doc:
-                for pid in wave_info["prompts"]:
-                    deps[pid] = list(all_prior)
-                all_prior.extend(wave_info["prompts"])
+    visited = set()
+    for node in prompts:
+        if node not in visited:
+            if has_cycle(node, set(), set()):
+                errors.add(f"Cycle detected in dependency graph for workflow '{workflow_id}'")
+                break
 
-    # Calculate waves
-    waves = calculate_waves(deps) if deps else []
+    # Check that all nodes can reach the sink
+    if len(sinks) == 1:
+        sink = sinks.pop()
 
-    # Get completion state
-    state = parse_state_tracking(content)
+        def can_reach_sink(node, visited):
+            if node == sink:
+                return True
+            visited.add(node)
 
-    # Resolve all prompt paths
-    prompts = {}
-    for prompt_id in deps.keys():
-        resolved = resolve_prompt_path(prompt_id, prompts_dir)
-        if resolved:
-            prompts[prompt_id] = resolved
-            prompts[prompt_id]["completed"] = state.get(prompt_id, False)
-            prompts[prompt_id]["dependencies"] = deps.get(prompt_id, [])
+            for dependent in dependents.get(node, []):
+                if dependent not in visited:
+                    if can_reach_sink(dependent, visited):
+                        return True
+            return False
 
-    return {
-        "orchestrator": str(file_path.absolute()),
-        "dependencies": deps,
-        "waves": waves,
-        "prompts": prompts,
-        "state": state
-    }
-
-
-def parse_prompt_list(prompt_list: str, prompts_dir: Path) -> dict:
-    """Parse a comma-separated prompt list (no dependencies)."""
-    ids = [p.strip() for p in prompt_list.split(",") if p.strip()]
-
-    prompts = {}
-    for prompt_id in ids:
-        resolved = resolve_prompt_path(prompt_id, prompts_dir)
-        if resolved:
-            prompts[prompt_id] = resolved
-            prompts[prompt_id]["completed"] = False
-            prompts[prompt_id]["dependencies"] = []
-
-    # All prompts in single wave (no deps)
-    waves = [list(prompts.keys())] if prompts else []
-
-    return {
-        "orchestrator": None,
-        "dependencies": {pid: [] for pid in prompts.keys()},
-        "waves": waves,
-        "prompts": prompts,
-        "state": {}
-    }
+        for node in prompts:
+            if not can_reach_sink(node, set()):
+                errors.add(
+                    f"Prompt '{node}' cannot reach the sink '{sink}'. "
+                    f"All paths must converge to the sink."
+                )
 
 
-def is_file_path_input(prompt_input: str) -> bool:
-    """Detect if input looks like file paths rather than prompt IDs.
+def validate_workflow(workflow_id, workflow, errors):
+    """Validate a single workflow."""
+    if not isinstance(workflow, dict):
+        errors.add(f"workflows.{workflow_id} must be a map")
+        return
 
-    File paths contain '/' or end with '.md'.
-    Prompt IDs follow pattern like '003-01' with no path separators.
-    """
-    items = [p.strip() for p in prompt_input.split(",") if p.strip()]
-    return any("/" in item or item.endswith(".md") for item in items)
+    # Check for unknown keys
+    for key in workflow:
+        if key not in ALLOWED_WORKFLOW_KEYS:
+            allowed_str = ", ".join(sorted(ALLOWED_WORKFLOW_KEYS))
+            suggestion = suggest_correction(key, ALLOWED_WORKFLOW_KEYS)
+            errors.add(
+                f"Unknown field 'workflows.{workflow_id}.{key}'{suggestion} "
+                f"(allowed: {allowed_str})"
+            )
 
-
-def extract_prompt_id_from_path(file_path: str) -> str:
-    """Extract prompt ID from a file path.
-
-    Examples:
-        gh-9-test-issue.md -> gh-9
-        003-01-state-management.md -> 003-01
-        some-file.md -> some-file (fallback to stem)
-    """
-    path = Path(file_path)
-    stem = path.stem
-
-    # Try gh-N pattern (github issues)
-    gh_match = re.match(r"^(gh-\d+)", stem)
-    if gh_match:
-        return gh_match.group(1)
-
-    # Try NNN-NN pattern (standard prompts)
-    std_match = re.match(r"^(\d{3}-\d{2})", stem)
-    if std_match:
-        return std_match.group(1)
-
-    # Fallback to full stem
-    return stem
-
-
-def resolve_file_path(file_path: str) -> dict | None:
-    """Resolve a file path directly to prompt metadata.
-
-    Unlike resolve_prompt_path which searches by ID, this uses the path as-is.
-    """
-    path = Path(file_path)
-    if not path.exists():
-        return None
-
-    prompt_id = extract_prompt_id_from_path(file_path)
-
-    # Extract title from filename
-    stem = path.stem
-    # Remove the ID prefix to get the title part
-    if stem.startswith(prompt_id):
-        title_part = stem[len(prompt_id):].lstrip("-")
+    # Validate required fields
+    if "base" not in workflow:
+        errors.add(f"workflows.{workflow_id} is missing required field 'base'")
     else:
-        title_part = stem
-    title = title_part.replace("-", " ").title() or prompt_id
+        base = workflow["base"]
+        if not isinstance(base, str) or not base.strip():
+            errors.add(f"workflows.{workflow_id}.base must be non-empty string")
 
-    return {
-        "id": prompt_id,
-        "path": str(path.absolute()),
-        "filename": path.name,
-        "title": title
-    }
+    if "branch" not in workflow:
+        errors.add(f"workflows.{workflow_id} is missing required field 'branch'")
+    else:
+        branch = workflow["branch"]
+        if not isinstance(branch, str) or not branch.strip():
+            errors.add(f"workflows.{workflow_id}.branch must be non-empty string")
+
+    # Validate on_complete
+    validate_on_complete(
+        workflow.get("on_complete"),
+        f"workflows.{workflow_id}.on_complete",
+        errors
+    )
+
+    # Validate prompts
+    if "prompts" not in workflow:
+        errors.add(f"workflows.{workflow_id} is missing required field 'prompts'")
+        return
+
+    prompts = workflow["prompts"]
+    if not isinstance(prompts, dict) or not prompts:
+        errors.add(f"workflows.{workflow_id}.prompts must be non-empty map")
+        return
+
+    # Validate each prompt
+    prompt_ids = set(prompts.keys())
+    for prompt_id, prompt in prompts.items():
+        validate_prompt(prompt_id, prompt, workflow_id, prompt_ids, errors)
+
+    # Validate DAG structure
+    validate_dag(workflow_id, prompts, errors)
 
 
-def parse_file_path_list(prompt_list: str) -> dict:
-    """Parse comma-separated file paths (no dependencies).
+def validate_config(config):
+    """Validate the entire YAML config."""
+    errors = ValidationError()
 
-    Similar to parse_prompt_list but uses paths directly instead of ID resolution.
-    """
-    paths = [p.strip() for p in prompt_list.split(",") if p.strip()]
+    # Top-level must be 'workflows'
+    if not isinstance(config, dict):
+        errors.add("Config must be a map with 'workflows' key")
+        return errors
 
-    prompts = {}
-    for file_path in paths:
-        resolved = resolve_file_path(file_path)
-        if resolved:
-            prompt_id = resolved["id"]
-            prompts[prompt_id] = resolved
-            prompts[prompt_id]["completed"] = False
-            prompts[prompt_id]["dependencies"] = []
+    if "workflows" not in config:
+        errors.add("Config is missing required key 'workflows'")
+        return errors
 
-    # All prompts in single wave (no deps)
-    waves = [list(prompts.keys())] if prompts else []
+    workflows = config["workflows"]
+    if not isinstance(workflows, dict) or not workflows:
+        errors.add("'workflows' must be a non-empty map")
+        return errors
 
-    return {
-        "orchestrator": None,
-        "dependencies": {pid: [] for pid in prompts.keys()},
-        "waves": waves,
-        "prompts": prompts,
-        "state": {}
-    }
+    # Check for unknown top-level keys
+    for key in config:
+        if key != "workflows":
+            errors.add(f"Unknown field '{key}' at top level (only 'workflows' allowed)")
+
+    # Validate each workflow
+    for workflow_id in workflows:
+        validate_workflow(workflow_id, workflows[workflow_id], errors)
+
+    return errors
 
 
 def main():
-    parser = argparse.ArgumentParser(description="Parse orchestrator files")
-    parser.add_argument("input", help="Orchestrator file path or comma-separated prompt list")
-    parser.add_argument("--prompts-dir", default="./prompts",
-                        help="Directory containing prompt files")
-    parser.add_argument("--pending-only", action="store_true",
-                        help="Only include prompts not marked complete")
-
+    parser = argparse.ArgumentParser(description="Validate orchestrator YAML configs")
+    parser.add_argument("config", help="Path to YAML config file")
     args = parser.parse_args()
-    prompts_dir = Path(args.prompts_dir)
 
-    input_path = Path(args.input)
+    config_path = Path(args.config)
 
-    if input_path.exists() and input_path.suffix == ".md":
-        # Parse orchestrator file
-        result = parse_orchestrator(input_path, prompts_dir)
-    elif is_file_path_input(args.input):
-        # Input contains file paths - use them directly
-        result = parse_file_path_list(args.input)
+    if not config_path.exists():
+        print(f"ERROR: Config file not found: {config_path}", file=sys.stderr)
+        sys.exit(1)
+
+    # Load YAML
+    try:
+        with open(config_path) as f:
+            config = yaml.safe_load(f)
+    except yaml.YAMLError as e:
+        print(f"ERROR: Failed to parse YAML: {e}", file=sys.stderr)
+        sys.exit(1)
+    except Exception as e:
+        print(f"ERROR: Failed to read file: {e}", file=sys.stderr)
+        sys.exit(1)
+
+    if config is None:
+        print("ERROR: Config file is empty", file=sys.stderr)
+        sys.exit(1)
+
+    # Validate
+    errors = validate_config(config)
+
+    if errors.has_errors():
+        errors.print()
+        sys.exit(1)
     else:
-        # Treat as comma-separated prompt IDs
-        result = parse_prompt_list(args.input, prompts_dir)
-
-    # Filter to pending only if requested
-    if args.pending_only:
-        pending_ids = {pid for pid, info in result["prompts"].items()
-                       if not info.get("completed", False)}
-        result["prompts"] = {pid: info for pid, info in result["prompts"].items()
-                            if pid in pending_ids}
-        result["waves"] = [[pid for pid in wave if pid in pending_ids]
-                          for wave in result["waves"]]
-        result["waves"] = [w for w in result["waves"] if w]  # Remove empty waves
-
-    print(json.dumps(result, indent=2))
+        print("VALID")
+        sys.exit(0)
 
 
 if __name__ == "__main__":
