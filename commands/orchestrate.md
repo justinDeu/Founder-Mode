@@ -8,6 +8,7 @@ allowed-tools:
   - Bash
   - Glob
   - Task
+  - Skill
   - AskUserQuestion
 ---
 
@@ -40,7 +41,54 @@ Execute workflow configs with STRICT adherence to the defined plan.
 4. **ATOMIC WORKFLOWS**: A workflow either completes fully or fails entirely.
    - Partial completion is failure
    - All-or-nothing execution
+
+5. **USE /fm:run-prompt FOR ALL PROMPT EXECUTION**: Never use Task agents directly.
+   - Every prompt MUST be executed via `/fm:run-prompt`
+   - The model specified in YAML MUST be passed via `--model` flag
+   - Task agents are for orchestration coordination ONLY, not prompt execution
 </strict_execution_rules>
+
+## CRITICAL: Prompt Execution Method
+
+<prompt_execution_method>
+**ALWAYS execute prompts via /fm:run-prompt. NEVER use Task agents for prompt execution.**
+
+This is non-negotiable. The YAML workflow specifies a `model` for each prompt. That model MUST be honored.
+
+### Correct Execution Pattern
+
+For EVERY prompt in the workflow, invoke:
+```
+/fm:run-prompt {prompt.path} --model {prompt.model} --cwd {worktree-path}
+```
+
+### Model Execution Reference
+
+| YAML `model:` value | Execution command |
+|---------------------|-------------------|
+| `claude` | `/fm:run-prompt path/to/prompt.md --model claude` |
+| `claude-zai` | `/fm:run-prompt path/to/prompt.md --model claude-zai` |
+| `codex` | `/fm:run-prompt path/to/prompt.md --model codex` |
+| `gemini` | `/fm:run-prompt path/to/prompt.md --model gemini` |
+| `zai` | `/fm:run-prompt path/to/prompt.md --model zai` |
+| `opencode` | `/fm:run-prompt path/to/prompt.md --model opencode` |
+| (any model) | `/fm:run-prompt path/to/prompt.md --model {model}` |
+
+### Why This Matters
+
+- Task agents ONLY use Claude, regardless of what you tell them
+- The `model:` field in YAML is IGNORED if you use Task agents
+- /fm:run-prompt routes to the correct model via executor.py
+- This is the ONLY way to honor the workflow specification
+
+### Pre-Execution Checklist
+
+Before launching ANY prompt, verify:
+- [ ] Using /fm:run-prompt? (YES, always)
+- [ ] Passing --model {yaml_model}? (YES, always)
+- [ ] Using Task agent for execution? (NO, never)
+- [ ] Model matches YAML specification? (YES, verify)
+</prompt_execution_method>
 
 ## Arguments
 
@@ -164,65 +212,48 @@ Parallel: {yes/no}
 For each prompt in wave:
 ```bash
 # Create temp worktree
-git worktree add "$COMMON_DIR/{workflow-id}--{prompt-id}" {branch}
+git worktree add "$COMMON_DIR/{workflow-id}--{prompt-id}" -b {workflow-id}--{prompt-id} {branch}
 ```
 
-Spawn Task agents for ALL prompts in wave **simultaneously**:
+Execute ALL prompts in wave **simultaneously** using /fm:run-prompt:
 ```
-# For each prompt in wave, spawn in parallel:
-Task(
-  subagent_type: "general-purpose",
-  run_in_background: {--background flag},
-  prompt: """
-Execute prompt: {prompt-id} - {title}
-
-Working directory: {worktree-path}/{workflow-id}--{prompt-id}
-Model: {model from prompt or workflow default}
-
-Read the prompt file at: {prompt.path}
-Execute completely.
-
-Working in isolated worktree. Do NOT modify other worktrees.
-
-On completion, write result to .founder-mode/logs/{prompt-id}-result.json:
-{
-  "prompt_id": "{prompt-id}",
-  "status": "success|failed",
-  "summary": "what was accomplished",
-  "files_changed": ["list", "of", "files"],
-  "errors": []
-}
-"""
+# For each prompt in wave, invoke in parallel via Skill tool:
+Skill(
+  skill: "fm:run-prompt",
+  args: "{prompt.path} --model {prompt.model} --cwd {worktree-path}/{workflow-id}--{prompt-id}"
 )
+```
+
+**CRITICAL**: Each prompt MUST use /fm:run-prompt with:
+- `--model {prompt.model}` - The model specified in YAML (e.g., claude-zai, codex)
+- `--cwd {worktree-path}` - The isolated worktree for this prompt
+
+Example for parallel wave with claude-zai:
+```
+# Prompt 1: git-history
+Skill(skill: "fm:run-prompt", args: "prompts/direction/001-git-history-analyzer.md --model claude-zai --cwd /path/to/worktree--git-history")
+
+# Prompt 2: code-scanner (in parallel)
+Skill(skill: "fm:run-prompt", args: "prompts/direction/002-code-pattern-scanner.md --model claude-zai --cwd /path/to/worktree--code-scanner")
 ```
 
 **5c. If wave has single prompt:**
 
-Execute directly in base worktree:
+Execute directly in base worktree using /fm:run-prompt:
 ```
-Task(
-  subagent_type: "general-purpose",
-  run_in_background: {--background flag},
-  prompt: """
-Execute prompt: {prompt-id} - {title}
-
-Working directory: {worktree-path}
-Model: {model from prompt or workflow default}
-
-Read the prompt file at: {prompt.path}
-Execute completely.
-
-On completion, write result to .founder-mode/logs/{prompt-id}-result.json:
-{
-  "prompt_id": "{prompt-id}",
-  "status": "success|failed",
-  "summary": "what was accomplished",
-  "files_changed": ["list", "of", "files"],
-  "errors": []
-}
-"""
+Skill(
+  skill: "fm:run-prompt",
+  args: "{prompt.path} --model {prompt.model} --cwd {worktree-path}"
 )
 ```
+
+Example:
+```
+Skill(skill: "fm:run-prompt", args: "prompts/direction/003-trajectory-detector.md --model claude-zai --cwd /path/to/direction-analyzer")
+```
+
+**NEVER use Task(subagent_type: "general-purpose") for prompt execution.**
+Task agents ignore the model specification and always use Claude.
 
 **5d. Monitor execution:**
 
