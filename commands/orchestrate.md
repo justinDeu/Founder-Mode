@@ -1,405 +1,505 @@
 ---
 name: fm:orchestrate
-description: Execute multiple prompts with dependency management and parallel execution
-argument-hint: <orchestrator-file|prompt-list> [--model ?|claude|codex|...] [--pending-only]
+description: Execute workflow configs with strict adherence to defined plans
+argument-hint: <workflow.yaml> <workflow-id> [--model ?|claude|codex|...] [--background]
 allowed-tools:
   - Read
   - Write
   - Bash
   - Glob
   - Task
+  - Skill
   - AskUserQuestion
 ---
 
 # Orchestrate
 
-Execute multiple prompts respecting dependencies. Prompts within the same wave run in parallel.
+Execute workflow configs with STRICT adherence to the defined plan.
+
+## CRITICAL: EXECUTION RULES
+
+<strict_execution_rules>
+**THE PLAN IS LAW. THERE ARE NO EXCEPTIONS.**
+
+1. **ZERO DEVIATION**: Execute prompts EXACTLY as defined in the YAML.
+   - Do not skip prompts
+   - Do not reorder prompts
+   - Do not add prompts
+   - Do not modify prompt parameters
+
+2. **FAIL FAST**: If ANY step fails, STOP the workflow IMMEDIATELY.
+   - Do not attempt to recover
+   - Do not continue with other prompts
+   - Do not try alternative approaches
+   - Report failure and halt
+
+3. **NO IMPROVISATION**: The orchestrator does not make decisions.
+   - Prompts make decisions
+   - Orchestrator only coordinates
+   - If unclear, STOP and ask user
+
+4. **ATOMIC WORKFLOWS**: A workflow either completes fully or fails entirely.
+   - Partial completion is failure
+   - All-or-nothing execution
+
+5. **USE /fm:run-prompt FOR ALL PROMPT EXECUTION**: Never use Task agents directly.
+   - Every prompt MUST be executed via `/fm:run-prompt`
+   - The model specified in YAML MUST be passed via `--model` flag
+   - Task agents are for orchestration coordination ONLY, not prompt execution
+</strict_execution_rules>
+
+## CRITICAL: Prompt Execution Method
+
+<prompt_execution_method>
+**ALWAYS execute prompts via /fm:run-prompt. NEVER use Task agents for prompt execution.**
+
+This is non-negotiable. The YAML workflow specifies a `model` for each prompt. That model MUST be honored.
+
+### Correct Execution Pattern
+
+For EVERY prompt in the workflow, invoke:
+```
+/fm:run-prompt {prompt.path} --model {prompt.model} --cwd {worktree-path}
+```
+
+### Model Execution Reference
+
+| YAML `model:` value | Execution command |
+|---------------------|-------------------|
+| `claude` | `/fm:run-prompt path/to/prompt.md --model claude` |
+| `claude-zai` | `/fm:run-prompt path/to/prompt.md --model claude-zai` |
+| `codex` | `/fm:run-prompt path/to/prompt.md --model codex` |
+| `gemini` | `/fm:run-prompt path/to/prompt.md --model gemini` |
+| `zai` | `/fm:run-prompt path/to/prompt.md --model zai` |
+| `opencode` | `/fm:run-prompt path/to/prompt.md --model opencode` |
+| (any model) | `/fm:run-prompt path/to/prompt.md --model {model}` |
+
+### Why This Matters
+
+- Task agents ONLY use Claude, regardless of what you tell them
+- The `model:` field in YAML is IGNORED if you use Task agents
+- /fm:run-prompt routes to the correct model via executor.py
+- This is the ONLY way to honor the workflow specification
+
+### Pre-Execution Checklist
+
+Before launching ANY prompt, verify:
+- [ ] Using /fm:run-prompt? (YES, always)
+- [ ] Passing --model {yaml_model}? (YES, always)
+- [ ] Using Task agent for execution? (NO, never)
+- [ ] Model matches YAML specification? (YES, verify)
+</prompt_execution_method>
 
 ## Arguments
 
 | Argument | Type | Default | Description |
 |----------|------|---------|-------------|
-| `<input>` | positional | required | Orchestrator .md file OR comma-separated prompt IDs |
+| `<workflow.yaml>` | positional | required | Path to YAML workflow config |
+| `<workflow-id>` | positional | required | Which workflow to execute from config |
 | `--model` | option | `?` | Default model. Use `?` for per-prompt selection. |
-| `--pending-only` | flag | false | Skip prompts marked complete in orchestrator |
-| `--worktree` | flag | false | Create isolated worktree per prompt |
 | `--background` | flag | false | Run non-Claude models in background |
 
 ## Execution Flow
 
-### Step 1: Parse Input
+### Step 1: Validate Config
 
-<get_orchestrator_path>
-Locate orchestrator.py:
+<validate_config>
 ```bash
-PLUGIN_ROOT=$(jq -r '.plugins."founder-mode@local"[0].installPath // empty' ~/.claude/plugins/installed_plugins.json 2>/dev/null)
+# Locate orchestrator.py
+PLUGIN_ROOT=$(git rev-parse --show-toplevel 2>/dev/null)
 if [ -z "$PLUGIN_ROOT" ]; then
-    # Works in normal repos and worktrees
-    PLUGIN_ROOT=$(git rev-parse --show-toplevel 2>/dev/null)
-fi
-if [ -z "$PLUGIN_ROOT" ]; then
-    # Fallback for bare repo parent setups
     PLUGIN_ROOT=$(git rev-parse --git-common-dir 2>/dev/null | sed 's|/\.bare$||; s|/\.git$||')
 fi
 ORCHESTRATOR="$PLUGIN_ROOT/scripts/orchestrator.py"
+
+# Validate config
+python3 "$ORCHESTRATOR" {workflow.yaml}
 ```
-</get_orchestrator_path>
 
-<parse_input>
-Call orchestrator.py to parse input:
+If exit code != 0: STOP. Display errors. Do not proceed.
+</validate_config>
 
+### Step 2: Load YAML and Select Workflow
+
+<load_workflow>
+```yaml
+# Read the YAML file directly
+import yaml
+
+with open("{workflow.yaml}") as f:
+    config = yaml.safe_load(f)
+
+workflow = config["workflows"]["{workflow-id}"]
+
+# Extract workflow details
+base = workflow["base"]           # git branch to start from
+branch = workflow["branch"]       # working branch name
+on_complete = workflow.get("on_complete", {})
+prompts = workflow["prompts"]
+```
+</load_workflow>
+
+### Step 3: Compute Waves via Topological Sort
+
+<compute_waves>
+Waves are computed by analyzing the `after` dependencies:
+
+```
+Wave 1: All prompts with no 'after' dependencies (entry points)
+Wave N: All prompts whose 'after' deps are satisfied by waves 1..N-1
+Final wave: Contains the sink prompt
+```
+
+Algorithm:
+```
+prompts_without_deps = [p for p in prompts if not prompts[p].get('after')]
+waves = [prompts_without_deps]
+
+remaining = set(prompts) - set(prompts_without_deps)
+completed = set(prompts_without_deps)
+
+while remaining:
+    ready = [p for p in remaining if all(d in completed for d in prompts[p].get('after', []))]
+    if not ready:
+        raise ValueError("Cannot resolve waves")
+    waves.append(ready)
+    completed.update(ready)
+    remaining -= set(ready)
+```
+
+Example output:
+```
+Wave 1: [setup, db-schema]
+Wave 2: [backend-auth]
+Wave 3: [frontend-auth]
+Wave 4: [auth-tests] (sink)
+```
+</compute_waves>
+
+### Step 4: Create Base Worktree
+
+<create_base_worktree>
 ```bash
-python3 "$ORCHESTRATOR" "{input}" --prompts-dir ./prompts {--pending-only}
+# Compute worktree location
+COMMON_DIR=$(git rev-parse --git-common-dir | sed 's|/\.git$||')
+WORKTREE_PATH="$COMMON_DIR/{branch}"
+
+# Create worktree
+git worktree add "$WORKTREE_PATH" -b {branch} {base}
 ```
 
-This returns JSON:
-```json
-{
-  "orchestrator": "/path/to/file.md",
-  "dependencies": {"003-01": [], "003-02": ["003-01"]},
-  "waves": [["003-01"], ["003-02", "003-03"]],
-  "prompts": {
-    "003-01": {
-      "id": "003-01",
-      "path": "/path/to/003-01-name.md",
-      "title": "Name",
-      "completed": false,
-      "dependencies": []
-    }
-  }
-}
-```
-</parse_input>
+If fails: STOP workflow. Report git error.
+</create_base_worktree>
 
-<validate_input>
-If no prompts found:
-```
-No prompts found matching input: {input}
+### Step 5: Execute Waves
 
-Check that:
-- Orchestrator file exists and has valid format
-- Prompt IDs match files in ./prompts/
-- Use --pending-only only if orchestrator has state tracking
-```
-Exit without proceeding.
-</validate_input>
-
-### Step 2: Display Execution Plan and Confirm
-
-Show the user what will be executed:
-
-```
-Execution Plan
-==============
-
-Orchestrator: {orchestrator path or "Ad-hoc list"}
-Total prompts: {count}
-Waves: {wave count}
-
-Wave 1:
-  - 003-01: State Management Foundation
-  - 003-02: New Project Command (depends on: 003-01)
-
-Wave 2:
-  - 003-03: Discuss Phase (depends on: 003-02)
-  - 003-04: Plan Phase (depends on: 003-03)
-
-{if --pending-only}
-Skipped (already complete): 003-01, 003-02
-{/if}
-```
-
-<confirm_plan>
-Use AskUserQuestion to confirm before proceeding:
-
-Question: "Proceed with this execution plan?"
-Options:
-- `Proceed` - Continue to model selection and execution
-- `Modify` - Let user specify different prompts or options
-- `Cancel` - Abort orchestration
-
-If user selects "Modify", ask what they want to change:
-- Different prompt list
-- Different flags (--pending-only, --background, etc.)
-- Different orchestrator file
-
-If user selects "Cancel", exit with:
-```
-Orchestration cancelled.
-```
-</confirm_plan>
-
-### Step 3: Model Selection
-
-<model_selection_per_prompt>
-If `--model ?` or no model specified, prompt for each prompt's model:
-
-For each prompt, use AskUserQuestion:
-
-Question: "Select model for {prompt_id}: {title}"
-Options:
-- `claude` - Claude in Task subagent
-- `codex` - OpenAI Codex (gpt-5.2-codex)
-- `gemini` - Gemini 3 Flash
-- `codex-high` - Codex with high reasoning
-- `opencode-zai` - OpenCode with Z.AI
-
-Store selections in a mapping: `{prompt_id: model}`
-</model_selection_per_prompt>
-
-<model_selection_batch>
-If `--model MODEL` specified, use that model for all prompts.
-
-Store: `{prompt_id: MODEL}` for all prompts.
-</model_selection_batch>
-
-### Step 4: Execute Waves
-
+<execute_waves>
 For each wave in order:
 
-<execute_wave>
-**4a. Report wave start:**
+**5a. Report wave start:**
 ```
-Wave {N} Starting
-=================
-Prompts: {list of prompt IDs in this wave}
+═══════════════════════════════════════════════════════════════
+WAVE {N}/{TOTAL} STARTING
+Workflow: {workflow-id}
+Branch: {branch}
+Prompts: {prompt-ids}
+Parallel: {yes/no}
+═══════════════════════════════════════════════════════════════
 ```
 
-**4b. Spawn Task agents for all prompts in wave (PARALLEL):**
+**5b. If wave has multiple prompts (parallel execution):**
 
-Route through run-prompt when `--worktree` is specified (ensures worktree creation for all models).
-For Claude models without `--worktree`, spawn directly as Task subagents.
-For non-Claude models, always spawn Tasks that call run-prompt.
-
-CRITICAL: Spawn ALL tasks for the wave in a SINGLE message with multiple Task tool calls.
-
-<spawn_with_worktree>
-**If `--worktree` flag is set (any model):**
-
-All prompts route through run-prompt to leverage its worktree creation logic:
-
+For each prompt in wave:
+```bash
+# Create temp worktree
+git worktree add "$COMMON_DIR/{workflow-id}--{prompt-id}" -b {workflow-id}--{prompt-id} {branch}
 ```
-# For each prompt in wave, spawn in parallel:
-Task(
-  subagent_type: "general-purpose",
-  run_in_background: true,  # if --background
-  prompt: """
-Execute prompt via run-prompt: {prompt_id} - {title}
 
-Call:
-/fm:run-prompt {prompt_path} --model {model} --worktree {--background}
-
-Write results to .founder-mode/logs/{prompt_id}-result.json:
-{
-  "prompt_id": "{prompt_id}",
-  "status": "success|failed",
-  "summary": "what was accomplished",
-  "files_changed": ["list", "of", "files"],
-  "errors": []
-}
-"""
-)
+Execute ALL prompts in wave **simultaneously** using /fm:run-prompt:
 ```
-</spawn_with_worktree>
-
-<spawn_without_worktree>
-**If no `--worktree` flag:**
-
-For Claude models, spawn directly as Task subagents.
-For non-Claude models, spawn Tasks that call run-prompt.
-
-```
-# For each prompt in wave, spawn in parallel:
-Task(
-  subagent_type: "general-purpose",
-  run_in_background: true,  # if --background
-  prompt: """
-Execute prompt: {prompt_id} - {title}
-
-<task>
-{Read prompt file content}
-</task>
-
-Working directory: {cwd}
-Model: {selected_model}
-
-If non-Claude model, call:
-/fm:run-prompt {prompt_path} --model {model} {--background}
-
-Execute completely. Write results to .founder-mode/logs/{prompt_id}-result.json:
-{
-  "prompt_id": "{prompt_id}",
-  "status": "success|failed",
-  "summary": "what was accomplished",
-  "files_changed": ["list", "of", "files"],
-  "errors": []
-}
-"""
-)
-```
-</spawn_without_worktree>
-
-**4c. If --background with non-Claude, spawn monitors:**
-
-For each background execution, spawn a readonly-log-watcher:
-
-```
-Task(
-  subagent_type: "founder-mode:readonly-log-watcher",
-  run_in_background: true,
-  model: "haiku",
-  prompt: """
-Monitor execution of prompt {prompt_id}.
-Log file: .founder-mode/logs/{log_file}
-Timeout: 30 minutes
-
-Report status changes. Final report when complete or timeout.
-"""
+# For each prompt in wave, invoke in parallel via Skill tool:
+Skill(
+  skill: "fm:run-prompt",
+  args: "{prompt.path} --model {prompt.model} --cwd {worktree-path}/{workflow-id}--{prompt-id}"
 )
 ```
 
-**4d. Wait for wave completion:**
+**CRITICAL**: Each prompt MUST use /fm:run-prompt with:
+- `--model {prompt.model}` - The model specified in YAML (e.g., claude-zai, codex)
+- `--cwd {worktree-path}` - The isolated worktree for this prompt
 
-If foreground execution: Tasks complete synchronously, proceed to next wave.
+Example for parallel wave with claude-zai:
+```
+# Prompt 1: git-history
+Skill(skill: "fm:run-prompt", args: "prompts/direction/001-git-history-analyzer.md --model claude-zai --cwd /path/to/worktree--git-history")
 
-If background execution: Poll result files until all prompts in wave complete.
+# Prompt 2: code-scanner (in parallel)
+Skill(skill: "fm:run-prompt", args: "prompts/direction/002-code-pattern-scanner.md --model claude-zai --cwd /path/to/worktree--code-scanner")
+```
+
+**5c. If wave has single prompt:**
+
+Execute directly in base worktree using /fm:run-prompt:
+```
+Skill(
+  skill: "fm:run-prompt",
+  args: "{prompt.path} --model {prompt.model} --cwd {worktree-path}"
+)
+```
+
+Example:
+```
+Skill(skill: "fm:run-prompt", args: "prompts/direction/003-trajectory-detector.md --model claude-zai --cwd /path/to/direction-analyzer")
+```
+
+**NEVER use Task(subagent_type: "general-purpose") for prompt execution.**
+Task agents ignore the model specification and always use Claude.
+
+**5d. Monitor execution:**
+
+While prompts are running, report status every 30 seconds:
+```
+[{timestamp}] MONITOR: {workflow-id}
+  Wave: {N}/{total}
+  Active: {prompt-ids currently running}
+  Complete: {prompt-ids finished this wave}
+  Elapsed: {time since wave start}
+```
+
+On prompt completion:
+```
+[{timestamp}] PROMPT COMPLETE: {prompt-id}
+  Duration: {time}
+  Files changed: {count}
+  Status: SUCCESS
+```
+
+On prompt failure:
+```
+[{timestamp}] PROMPT FAILED: {prompt-id}
+  Duration: {time}
+  Error: {error message}
+
+  !!! WORKFLOW HALTED !!!
+```
+
+**5e. Check results:**
+
+If ALL prompts succeed: proceed to merge step.
+
+If ANY prompt fails:
+```
+═══════════════════════════════════════════════════════════════
+WORKFLOW FAILED
+═══════════════════════════════════════════════════════════════
+Workflow: {workflow-id}
+Branch: {branch}
+Failed at: Wave {N}, Prompt {prompt-id}
+Error: {error message from result.json}
+
+Temp worktrees preserved for debugging:
+  - {workflow-id}--{prompt-id}
+  - {workflow-id}--{other-prompts}
+
+STOPPING. No further prompts will execute.
+═══════════════════════════════════════════════════════════════
+```
+
+STOP IMMEDIATELY. Do not continue. Preserve state.
+</execute_waves>
+
+### Step 6: Merge Parallel Work
+
+<merge_parallel_work>
+After parallel wave completes successfully:
+
+**6a. For each temp worktree in the wave:**
 
 ```bash
-# Check for completion
-for prompt_id in wave:
-    result_file=".founder-mode/logs/${prompt_id}-result.json"
-    if [ -f "$result_file" ]; then
-        status=$(jq -r '.status' "$result_file")
-        # Track completion
-    fi
-done
+cd "$WORKTREE_PATH"  # Base worktree
+git merge {workflow-id}--{prompt-id} --no-edit
 ```
 
-**4e. Report wave results:**
+**6b. If merge conflict occurs:**
+
+STOP execution. Report conflict:
 ```
-Wave {N} Complete
-=================
-| Prompt | Status | Summary |
-|--------|--------|---------|
-| 003-01 | SUCCESS | Created templates and utilities |
-| 003-02 | SUCCESS | Implemented new-project command |
+═══════════════════════════════════════════════════════════════
+MERGE CONFLICT
+═══════════════════════════════════════════════════════════════
+Wave {N} has merge conflicts:
+  - {workflow-id}--{prompt-a}: conflicts with {workflow-id}--{prompt-b}
+  - Files: {list of conflicting files}
 
-Proceeding to Wave {N+1}...
+Temp worktrees preserved for manual resolution.
+═══════════════════════════════════════════════════════════════
 ```
 
-**4f. Handle failures:**
-
-If any prompt in wave fails:
+Use AskUserQuestion:
 ```
-Wave {N} had failures:
-- 003-02: FAILED - {error summary}
-
+Question: "How should merge conflicts be resolved?"
 Options:
-1. Retry failed prompts
-2. Skip and continue to next wave
-3. Abort orchestration
+- "Resolve manually" - Preserve worktrees, exit for manual resolution
+- "Attempt auto-resolve" - Claude analyzes and resolves conflicts
+- "Abort workflow" - Cleanup and exit
 ```
 
-Use AskUserQuestion to let user decide.
-</execute_wave>
+If user chooses auto-resolve:
+1. Read conflicting files from both worktrees
+2. Understand intent from BOTH prompts
+3. Resolve conflicts by merging changes intelligently
+4. Test the resolution if possible
+5. Commit with message: "merge: resolve conflict between {prompt-a} and {prompt-b}"
+6. If auto-resolve fails: STOP, preserve state for manual intervention
 
-### Step 5: Final Report
+**6c. After successful merge:**
 
-After all waves complete:
-
-```
-Orchestration Complete
-======================
-
-Total prompts: {N}
-Successful: {N}
-Failed: {N}
-Skipped: {N}
-
-Results by wave:
-| Wave | Prompts | Status |
-|------|---------|--------|
-| 1 | 003-01, 003-02 | Complete |
-| 2 | 003-03, 003-04 | Complete |
-
-{if orchestrator file}
-Updated state in: {orchestrator path}
-{/if}
-
-Logs: .founder-mode/logs/
+Delete temp worktree:
+```bash
+git worktree remove "$COMMON_DIR/{workflow-id}--{prompt-id}"
 ```
 
-### Step 6: Update Orchestrator State (if applicable)
+**6d. Proceed to next wave ONLY if ALL merges succeeded**
+</merge_parallel_work>
 
-If input was an orchestrator file with state tracking, update completion checkboxes:
+### Step 7: Sink Reached - On Complete
 
-Read the orchestrator file, find state tracking section, update:
+<on_complete>
+When sink prompt completes successfully:
+
+**7a. Report completion:**
 ```
-[x] 003-01-state-management.md
-[x] 003-02-new-project.md
-[ ] 003-03-discuss-phase.md  <- still pending if failed
+═══════════════════════════════════════════════════════════════
+WORKFLOW COMPLETE
+═══════════════════════════════════════════════════════════════
+Workflow: {workflow-id}
+Branch: {branch}
+Prompts executed: {count}
+Waves: {total}
+═══════════════════════════════════════════════════════════════
 ```
 
-Write updated file.
+**7b. Execute on_complete actions:**
+
+If `create_pr: true`:
+```bash
+git push -u origin {branch}
+gh pr create \
+  --title "{workflow-id}" \
+  --body "Workflow execution complete
+
+Prompts: {list}
+Branch: {branch}
+"
+```
+
+If `merge_to: {branch}`:
+```bash
+git checkout {merge_to}
+git merge {branch} --no-edit
+```
+
+If `delete_worktree: true`:
+```bash
+git worktree remove "$WORKTREE_PATH"
+```
+
+**7c. Report final status:**
+```
+Final status: SUCCESS
+{if PR created}PR: {pr_url}{/if}
+{if merged}Merged to: {branch}{/if}
+```
+</on_complete>
+
+## Backward Compatibility: Comma-Separated Mode
+
+<comma_mode>
+For simple parallel execution without workflow config:
+
+```
+/fm:orchestrate prompts/001.md,prompts/002.md,prompts/003.md
+```
+
+This mode:
+- No validation needed
+- All prompts run in parallel (single wave)
+- Each gets auto-generated worktree named after prompt filename
+- No merging (independent work)
+- No on_complete actions
+</comma_mode>
 
 ## Examples
 
-**Run orchestrator file:**
+**Execute workflow with YAML config:**
 ```
-/fm:orchestrate prompts/phase-completion/000-orchestrator.md
-```
-
-**Run specific prompts (no deps, all parallel):**
-```
-/fm:orchestrate 003-01,003-02,003-03 --model codex
+/fm:orchestrate workflows/auth-feature.yaml auth-feature
 ```
 
-**Run pending prompts only:**
+**Execute with per-prompt model selection:**
 ```
-/fm:orchestrate prompts/phase-completion/000-orchestrator.md --pending-only
+/fm:orchestrate workflows/auth-feature.yaml auth-feature --model ?
 ```
 
-**Run in background with worktrees:**
+**Execute in background:**
 ```
-/fm:orchestrate 003-01,003-02 --model codex --background --worktree
+/fm:orchestrate workflows/auth-feature.yaml auth-feature --background
+```
+
+**Simple parallel execution (no config):**
+```
+/fm:orchestrate prompts/001.md,prompts/002.md,prompts/003.md --model codex
 ```
 
 ## Error Handling
 
-<error_orchestrator_not_found>
-If orchestrator.py not found:
+<error_handling>
+**All errors halt the workflow. No exceptions.**
+
+| Error | Action |
+|-------|--------|
+| Config validation fails | Do not start. Show errors. |
+| Worktree creation fails | Stop. Report git error. |
+| Prompt execution fails | Stop. Preserve state. Report. |
+| Merge conflict | Stop. Ask user for resolution strategy. |
+| Merge fails | Stop. Preserve worktrees. |
+| Git push fails | Stop. Branch preserved locally. |
+| PR creation fails | Warn but workflow considered complete (code exists). |
+
+On any error, preserve state for debugging:
+- Keep temp worktrees
+- Keep partial branches
+- Log all output to .founder-mode/logs/
+</error_handling>
+
+## Monitoring
+
+<monitoring>
+The orchestrator MUST maintain visibility throughout execution:
+
+**Continuous status (every 30 seconds during prompt execution):**
 ```
-Orchestrator script not found.
-
-Expected: {expected_path}
-
-Ensure founder-mode is properly installed.
+[{timestamp}] MONITOR: {workflow-id}
+  Wave: {current-wave}/{total-waves}
+  Active: {prompt-ids currently running}
+  Complete: {prompt-ids finished this wave}
+  Elapsed: {time since wave start}
 ```
-</error_orchestrator_not_found>
 
-<error_parse_failed>
-If parsing fails:
+**On prompt completion:**
 ```
-Failed to parse input: {error}
-
-For orchestrator files, ensure:
-- File has "## Dependency Graph" section
-- Prompt IDs follow NNN-NN pattern
-- Execution order is defined
-
-For prompt lists:
-- Use comma-separated IDs: 003-01,003-02,003-03
-- IDs must match files in ./prompts/
+[{timestamp}] PROMPT COMPLETE: {prompt-id}
+  Duration: {time}
+  Files changed: {count}
+  Status: SUCCESS
 ```
-</error_parse_failed>
 
-<error_circular_deps>
-If circular dependency detected:
+**On prompt failure:**
 ```
-Circular dependency detected.
+[{timestamp}] PROMPT FAILED: {prompt-id}
+  Duration: {time}
+  Error: {error message}
 
-Cannot resolve execution order for: {prompt IDs}
-
-Check dependency graph in orchestrator file.
+  !!! WORKFLOW HALTED !!!
 ```
-</error_circular_deps>
+</monitoring>
