@@ -1,12 +1,13 @@
 ---
 name: fm:create-prompt
-description: Create optimized prompts with clarifying questions
-argument-hint: [task description] [--folder path]
+description: Create optimized prompts for execution by any model
+argument-hint: [task description] [--folder path] [--depends refs]
 allowed-tools:
   - Read
   - Write
   - Bash
   - Glob
+  - Grep
   - Skill
   - AskUserQuestion
 ---
@@ -23,6 +24,7 @@ Parse `$ARGUMENTS` for:
 |----------|------|---------|-------------|
 | `[description]` | positional | none | Task description in natural language |
 | `--folder` | option | none | Subfolder under ./prompts/ for the new prompt |
+| `--depends` | option | none | Dependencies (prompt files, issue refs, or descriptions) |
 
 ## Core Process
 
@@ -82,19 +84,25 @@ Ask questions when:
 
 Keep clarifications minimal: 1-3 targeted questions max, then proceed.
 
-### Step 2: Complexity Assessment
+### Step 2: Gather Concrete Context
 
-Determine complexity level for prompt structure:
+Before generating the prompt, read relevant files to extract specific details:
 
-| Level | Characteristics | Template Depth |
-|-------|-----------------|----------------|
-| Simple | Single file, clear goal, no research needed | Minimal, focused |
-| Moderate | Multiple files, clear goal, some context needed | Standard with verification |
-| Complex | Multi-step, research needed, architectural impact | Comprehensive with sections |
+1. Use Glob to find target files
+2. Use Grep to locate specific code sections
+3. Use Read to get snippets with line numbers
+
+For each file that needs modification, gather:
+- Exact file path
+- Line numbers where changes go
+- Current code snippet
+- Patterns to follow from existing code
+
+Include this in the generated prompt's `<context>` and `<requirements>` sections.
 
 ### Step 3: Template Selection
 
-Based on task type detection, select the appropriate template.
+Based on task type, select the appropriate template.
 
 <template_keywords>
 | Template | Keywords | When to Use |
@@ -119,21 +127,22 @@ else:
 **Default behavior:** When no keywords match or the task type is ambiguous, default to the coding template since most prompts involve code changes.
 </template_selection>
 
-### Step 4: Prompt Numbering
+### Step 4: Prompt Naming
 
-Determine the next prompt number:
+Determine the prompt filename:
+
+1. **Check config** for `prompt_naming` in `founder_mode_config`
+2. **Infer from context**:
+   - GitHub issue/PR context: `gh-{number}-{slug}.md`
+   - Jira ticket context: `{project}-{number}-{slug}.md`
+   - General prompts: `{NNN}-{slug}.md` (find next available number)
 
 ```bash
-# Find highest existing number in ./prompts/
-ls -1 ./prompts/*.md 2>/dev/null | grep -oE '[0-9]+' | sort -n | tail -1
-# If none exist, start with 001
-# Increment by 1 for new prompt
+# List existing prompts to find next number if needed
+ls -1 ./prompts/*.md 2>/dev/null | grep -oE '^[0-9]+' | sort -n | tail -1
 ```
 
-Naming format:
-- Number: 001, 002, 003, etc. (zero-padded to 3 digits)
-- Name: lowercase, hyphen-separated, max 5 words
-- Example: `001-fix-auth-token-bug.md`
+Slug format: lowercase, hyphen-separated, max 5 words
 
 ### Step 5: Generate and Save
 
@@ -182,12 +191,29 @@ Display: "Prompt saved. Run later with `/fm:run-prompt {filename}`"
 
 <context>
 [Project type, tech stack, relevant constraints]
-@[relevant files to examine]
+
+Key files:
+- `[path/to/file.ext]` - [description] (~line N-M)
+
+@[path/to/file.ext]
 </context>
 
 <requirements>
-[Specific functional requirements]
-[Performance or quality requirements]
+## 1. [First change]
+
+[Description with specific location]
+
+```[language]
+# Current code (around line N):
+[existing code snippet]
+
+# Change to:
+[new code snippet]
+```
+
+## 2. [Second change]
+
+[Additional requirements with code examples]
 </requirements>
 
 <implementation>
@@ -201,10 +227,26 @@ Create/modify files:
 </output>
 
 <verification>
+```bash
+# [Test description]
+[actual command to run]
+# Expected: [expected output]
+```
+
 Before declaring complete:
 - [ ] [Build/test command passes]
 - [ ] [Specific behavior works as expected]
 </verification>
+
+<completion_protocol>
+When ALL tasks are complete and verified, output this EXACT line as your final output:
+
+<verification>VERIFICATION_COMPLETE</verification>
+
+If anything is incomplete or failing, output this EXACT line with your reason:
+
+<verification>NEEDS_RETRY: [reason]</verification>
+</completion_protocol>
 ```
 </coding_template>
 
@@ -226,7 +268,7 @@ Before declaring complete:
 <deliverables>
 [Format of research output]
 [Level of detail needed]
-Save findings to: ./research/[topic].md
+[Where to save findings - ask user or infer from project structure]
 </deliverables>
 
 <evaluation_criteria>
@@ -238,7 +280,18 @@ Save findings to: ./research/[topic].md
 Before completing, verify:
 - [ ] All key questions are answered
 - [ ] Sources are credible and relevant
+- [ ] Output file exists at specified path
 </verification>
+
+<completion_protocol>
+When ALL research is complete, output this EXACT line as your final output:
+
+<verification>VERIFICATION_COMPLETE</verification>
+
+If incomplete, output:
+
+<verification>NEEDS_RETRY: [reason]</verification>
+</completion_protocol>
 ```
 </research_template>
 
@@ -264,12 +317,23 @@ Before completing, verify:
 
 <output_format>
 [How results should be structured]
-Save analysis to: ./analyses/[descriptive-name].md
+[Where to save output - ask user or infer from project structure]
 </output_format>
 
 <verification>
 [How to validate the analysis is complete and accurate]
+- [ ] Output file exists at specified path
 </verification>
+
+<completion_protocol>
+When ALL analysis is complete, output this EXACT line as your final output:
+
+<verification>VERIFICATION_COMPLETE</verification>
+
+If incomplete, output:
+
+<verification>NEEDS_RETRY: [reason]</verification>
+</completion_protocol>
 ```
 </analysis_template>
 
@@ -284,90 +348,8 @@ Every generated prompt should include:
 
 ## Intelligence Rules
 
-1. **Clarity First**: If anything is unclear, ask before proceeding
-2. **Match Complexity**: Simple tasks get concise prompts, complex tasks get comprehensive structure
-3. **Precision Over Brevity**: A longer, clear prompt beats a short, ambiguous one
-4. **Explicit Instructions**: Tell Claude exactly what to do
-5. **Verification Always**: Every prompt includes success criteria
-
-## Examples
-
-**Example 1: Simple coding task**
-
-User: "Add a dark mode toggle to the settings page"
-
-Generated prompt (001-add-dark-mode-toggle.md):
-```xml
-<objective>
-Add a dark mode toggle to the settings page.
-This allows users to switch between light and dark themes based on their preference.
-</objective>
-
-<context>
-@src/pages/Settings.tsx
-@src/styles/theme.css
-</context>
-
-<requirements>
-- Add toggle switch component to settings page
-- Persist preference to localStorage
-- Apply theme class to document root
-</requirements>
-
-<implementation>
-- Use existing toggle component if available
-- Follow current styling patterns
-- Avoid inline styles
-</implementation>
-
-<output>
-Modify:
-- ./src/pages/Settings.tsx - Add toggle and state management
-- ./src/styles/theme.css - Add dark theme variables
-</output>
-
-<verification>
-- [ ] Toggle appears on settings page
-- [ ] Clicking toggle switches theme
-- [ ] Preference persists after page reload
-</verification>
-```
-
-**Example 2: Research task**
-
-User: "Research GraphQL vs REST for our mobile app"
-
-Generated prompt (002-research-graphql-vs-rest.md):
-```xml
-<research_objective>
-Compare GraphQL and REST for the mobile app API layer.
-This will inform the architecture decision for the upcoming API redesign.
-</research_objective>
-
-<scope>
-- Focus on mobile client use cases
-- Consider current React Native stack
-- Evaluate performance, caching, and offline support
-</scope>
-
-<deliverables>
-Save findings to: ./research/graphql-vs-rest.md
-
-Include:
-- Pros/cons comparison table
-- Performance considerations for mobile
-- Recommendation with rationale
-</deliverables>
-
-<evaluation_criteria>
-- Is each approach evaluated for mobile-specific concerns?
-- Are caching strategies addressed?
-- Is the recommendation actionable?
-</evaluation_criteria>
-
-<verification>
-- [ ] Both approaches evaluated fairly
-- [ ] Mobile-specific concerns addressed
-- [ ] Clear recommendation provided
-</verification>
-```
+1. **Gather Context First**: Read relevant files before generating. Extract line numbers and code snippets.
+2. **Be Specific**: "around line 478-496" beats "in the config section"
+3. **Show Code**: Include current → desired code as snippets in requirements
+4. **Testable Criteria**: Every verification item must be observable or runnable with a command
+5. **Always Include Completion Protocol**: Every prompt must include the `<completion_protocol>` section verbatim
