@@ -33,8 +33,11 @@ def parse_dependency_graph(content: str) -> dict[str, list[str]]:
 
     graph_text = graph_match.group(1)
 
-    # Extract all prompt IDs (pattern: NNN-NN)
+    # Extract all prompt IDs (pattern: NNN-NN or NNN alone)
+    # First try NNN-NN pattern, then NNN pattern for simpler IDs
     prompt_ids = re.findall(r"\b(\d{3}-\d{2})\b", graph_text)
+    if not prompt_ids:
+        prompt_ids = re.findall(r"\b(\d{3})\b", graph_text)
 
     # Initialize all prompts with empty deps
     for pid in prompt_ids:
@@ -46,9 +49,12 @@ def parse_dependency_graph(content: str) -> dict[str, list[str]]:
     lines = graph_text.split("\n")
     current_source = None
 
+    # Determine which pattern to use based on what we found
+    id_pattern = r"\b(\d{3}-\d{2})\b" if re.search(r"\b\d{3}-\d{2}\b", graph_text) else r"\b(\d{3})\b"
+
     for i, line in enumerate(lines):
         # Check if line contains a prompt ID
-        match = re.search(r"\b(\d{3}-\d{2})\b", line)
+        match = re.search(id_pattern, line)
         if match:
             pid = match.group(1)
             if current_source and current_source != pid:
@@ -91,8 +97,10 @@ def parse_execution_order(content: str) -> list[dict]:
         wave_name = match.group(2).strip()
         wave_content = match.group(3)
 
-        # Extract prompt IDs from this wave
+        # Extract prompt IDs from this wave (NNN-NN or NNN-name patterns)
         prompt_ids = re.findall(r"`(\d{3}-\d{2})[^`]*\.md`", wave_content)
+        if not prompt_ids:
+            prompt_ids = re.findall(r"`(\d{3})-[^`]*\.md`", wave_content)
 
         if prompt_ids:
             waves.append({
@@ -115,8 +123,9 @@ def parse_state_tracking(content: str) -> dict[str, bool]:
     """
     state = {}
 
-    # Match checkbox patterns
-    pattern = re.compile(r"\[([xX ])\]\s*`?(\d{3}-\d{2})[^`\n]*\.md`?")
+    # Match checkbox patterns (NNN-NN or NNN-name)
+    # Capture group includes optional -NN to get full ID like 003-01, not just 003
+    pattern = re.compile(r"\[([xX ])\]\s*`?(\d{3}(?:-\d{2})?)[^`\n]*\.md`?")
 
     for match in pattern.finditer(content):
         completed = match.group(1).lower() == "x"
@@ -282,6 +291,11 @@ def extract_prompt_id_from_path(file_path: str) -> str:
     std_match = re.match(r"^(\d{3}-\d{2})", stem)
     if std_match:
         return std_match.group(1)
+
+    # Try NNN pattern (simpler prompts like 001-status-file-schema)
+    simple_match = re.match(r"^(\d{3})", stem)
+    if simple_match:
+        return simple_match.group(1)
 
     # Fallback to full stem
     return stem
