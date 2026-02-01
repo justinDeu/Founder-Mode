@@ -18,6 +18,7 @@ from state import (
     extract_next_steps,
     get_state_file,
 )
+from status import start_agent, complete_agent, fail_agent
 
 
 # Z.AI Provider Documentation
@@ -67,6 +68,42 @@ def validate_zai_provider(model_name: str, command: list[str]) -> None:
                 # Debug log: uncomment if needed for troubleshooting
                 # print(f"Debug: Using known-working Z.AI provider: {arg}", file=sys.stderr)
                 return
+
+
+def update_status(
+    session_dir: str | None,
+    agent_id: str | None,
+    action: str,
+    **kwargs
+) -> None:
+    """Update agent status if session tracking is enabled.
+
+    Args:
+        session_dir: Path to session directory (None to skip)
+        agent_id: Agent identifier
+        action: One of 'start', 'complete', 'fail'
+        **kwargs: Additional arguments for the status function
+    """
+    if not session_dir or not agent_id:
+        return
+
+    session_path = Path(session_dir)
+
+    try:
+        if action == "start":
+            start_agent(session_path, agent_id, kwargs.get("pid"))
+        elif action == "complete":
+            complete_agent(session_path, agent_id, kwargs.get("exit_code", 0))
+        elif action == "fail":
+            fail_agent(
+                session_path,
+                agent_id,
+                kwargs.get("error", "Unknown error"),
+                kwargs.get("exit_code", 1),
+            )
+    except Exception as e:
+        # Don't fail execution due to status tracking errors
+        print(f"Warning: Status update failed: {e}", file=sys.stderr)
 
 
 # Model configuration structure:
@@ -185,7 +222,14 @@ def get_loop_log_path(base_dir: Path, prompt_id: str, timestamp: str) -> Path:
     return base_dir / f"{prompt_id}-loop-{timestamp}.log"
 
 
-def run_cli(model: str, prompt: str, cwd: str, log_path: Path) -> bool:
+def run_cli(
+    model: str,
+    prompt: str,
+    cwd: str,
+    log_path: Path,
+    session_dir: str | None = None,
+    agent_id: str | None = None,
+) -> bool:
     """Run the CLI for the given model (blocking). Returns True on success."""
     # Ensure log directory exists
     log_path.parent.mkdir(parents=True, exist_ok=True)
@@ -198,25 +242,54 @@ def run_cli(model: str, prompt: str, cwd: str, log_path: Path) -> bool:
         env = os.environ.copy()
         env.update(env_vars)
 
-    with open(log_path, "a") as log_file:
-        log_file.write(f"\n--- Execution at {time.strftime('%Y-%m-%d %H:%M:%S')} ---\n")
-        log_file.write(f"--- Model: {model} | Command: {' '.join(cmd[:3])}... ---\n")
-        log_file.flush()
+    # Mark agent as running
+    update_status(session_dir, agent_id, "start")
 
-        proc = subprocess.run(
-            cmd,
-            cwd=cwd,
-            input=stdin_data if uses_stdin else None,
-            stdout=log_file,
-            stderr=subprocess.STDOUT,
-            text=True,
-            env=env,
-        )
+    try:
+        with open(log_path, "a") as log_file:
+            log_file.write(f"\n--- Execution at {time.strftime('%Y-%m-%d %H:%M:%S')} ---\n")
+            log_file.write(f"--- Model: {model} | Command: {' '.join(cmd[:3])}... ---\n")
+            log_file.flush()
 
-    return proc.returncode == 0
+            proc = subprocess.run(
+                cmd,
+                cwd=cwd,
+                input=stdin_data if uses_stdin else None,
+                stdout=log_file,
+                stderr=subprocess.STDOUT,
+                text=True,
+                env=env,
+            )
+
+        success = proc.returncode == 0
+
+        # Update status based on result
+        if success:
+            update_status(session_dir, agent_id, "complete", exit_code=0)
+        else:
+            update_status(
+                session_dir,
+                agent_id,
+                "fail",
+                error=f"Exit code {proc.returncode}",
+                exit_code=proc.returncode,
+            )
+
+        return success
+
+    except Exception as e:
+        update_status(session_dir, agent_id, "fail", error=str(e), exit_code=1)
+        raise
 
 
-def run_cli_background(model: str, prompt: str, cwd: str, log_path: Path) -> int:
+def run_cli_background(
+    model: str,
+    prompt: str,
+    cwd: str,
+    log_path: Path,
+    session_dir: str | None = None,
+    agent_id: str | None = None,
+) -> int:
     """Run the CLI for the given model in background. Returns PID."""
     cmd, stdin_data, uses_stdin, env_vars = get_model_command(model, prompt)
 
@@ -251,7 +324,11 @@ def run_cli_background(model: str, prompt: str, cwd: str, log_path: Path) -> int
         proc.stdin.write(stdin_data)
         proc.stdin.close()
 
+    # Mark agent as running with PID
+    update_status(session_dir, agent_id, "start", pid=proc.pid)
+
     # Note: log_file intentionally not closed - subprocess owns it now
+    # Note: Background processes can't update status on completion - monitor will detect via PID
     return proc.pid
 
 
@@ -336,6 +413,10 @@ def main():
                         help="Marker indicating successful completion")
     parser.add_argument("--two-stage", action="store_true",
                         help="Enable two-stage verification (spec compliance + quality)")
+    parser.add_argument("--session-dir", default=None,
+                        help="Session directory for status updates")
+    parser.add_argument("--agent-id", default=None,
+                        help="Agent ID within the session")
 
     args = parser.parse_args()
 
@@ -362,13 +443,19 @@ def main():
 
     # Background execution: spawn and return immediately
     if args.background:
-        pid = run_cli_background(args.model, original_prompt, cwd, log_path)
+        pid = run_cli_background(
+            args.model, original_prompt, cwd, log_path,
+            args.session_dir, args.agent_id
+        )
         result = {
             "status": "running",
             "pid": pid,
             "log_path": str(log_path.absolute()),
             "model": args.model,
         }
+        if args.session_dir and args.agent_id:
+            result["session_dir"] = args.session_dir
+            result["agent_id"] = args.agent_id
         print(json.dumps(result))
         sys.exit(0)
 
@@ -450,7 +537,10 @@ If not, output:
 <verification>NEEDS_RETRY: [reason]</verification>
 """
 
-            success = run_cli(args.model, stage_prompt, cwd, iteration_log_path)
+            success = run_cli(
+                args.model, stage_prompt, cwd, iteration_log_path,
+                args.session_dir, args.agent_id
+            )
 
             # Append summary to loop log
             with open(loop_log_path, "a") as f:
@@ -513,7 +603,10 @@ If not, output:
             iteration_log_path = get_iteration_log_path(log_dir, prompt_id, iterations, execution_timestamp)
             iteration_logs.append(str(iteration_log_path.absolute()))
 
-            success = run_cli(args.model, current_prompt, cwd, iteration_log_path)
+            success = run_cli(
+                args.model, current_prompt, cwd, iteration_log_path,
+                args.session_dir, args.agent_id
+            )
 
             # Append summary to loop log
             with open(loop_log_path, "a") as f:
@@ -570,7 +663,10 @@ If not, output:
     # Non-loop mode: single execution
     else:
         iteration_log_path = log_path
-        success = run_cli(args.model, current_prompt, cwd, iteration_log_path)
+        success = run_cli(
+            args.model, current_prompt, cwd, iteration_log_path,
+            args.session_dir, args.agent_id
+        )
         iterations = 1
         status = "success" if success else "cli_error"
 
