@@ -1,7 +1,7 @@
 ---
 name: fm:orchestrate
 description: Execute multiple prompts with dependency management and parallel execution
-argument-hint: <workflow.xml|prompt-list> [--model ?|claude|codex|...] [--pending-only]
+argument-hint: <workflow.xml|prompt-list> [workflow-id] [--model ?|claude|codex|agent-team|...] [--pending-only]
 allowed-tools:
   - Read
   - Write
@@ -9,6 +9,12 @@ allowed-tools:
   - Glob
   - Task
   - AskUserQuestion
+  - TeamCreate
+  - SendMessage
+  - TaskCreate
+  - TaskUpdate
+  - TaskList
+  - TaskGet
 ---
 
 # Orchestrate
@@ -20,6 +26,7 @@ Execute multiple prompts respecting dependencies. Prompts within the same wave r
 | Argument | Type | Default | Description |
 |----------|------|---------|-------------|
 | `<input>` | positional | required | XML workflow file OR comma-separated prompt paths |
+| `[workflow-id]` | positional | (auto) | Selects which workflow to run when XML file contains multiple `<workflow>` elements. Optional if file has only one. |
 | `--model` | option | `?` | Default model. Use `?` for per-prompt selection. |
 | `--pending-only` | flag | false | Skip prompts marked complete in log files |
 | `--worktree` | flag | false | Create isolated worktree per prompt |
@@ -100,16 +107,24 @@ Before executing, validate the dependency graph:
 If validation fails, display all errors and exit without executing.
 </validate_dag>
 
-### Step 3: Compute Waves
+### Step 3: Compute Execution Schedule
 
-<compute_waves>
-Group prompts into execution waves using topological layering:
+<compute_schedule>
+Build a dependency-aware schedule. Waves are used for display and planning, but execution is dependency-triggered: a prompt starts as soon as all its dependencies complete, not when an entire wave finishes.
+
+**Wave assignment (for display):**
 
 - **Wave 1**: All prompts with zero `<after>` dependencies (source nodes)
 - **Wave N**: All prompts whose every dependency appears in waves 1 through N-1
 
-Store the wave assignments for display and execution.
-</compute_waves>
+**Execution rule:**
+
+A prompt becomes **ready** the moment every prompt in its `<after>` list has completed. Do not wait for an entire wave to finish before starting the next prompt. A single long-running task in wave 1 should not block wave 2 tasks that do not depend on it.
+
+For agent-team mode this is critical: the team lead should continuously check for newly unblocked prompts and assign them to idle teammates rather than waiting for a full wave boundary.
+
+Store the wave assignments for display and the raw dependency edges for execution.
+</compute_schedule>
 
 ### Step 4: Display Execution Plan and Confirm
 
@@ -120,19 +135,19 @@ Execution Plan
 ==============
 
 Workflow: {id} (or "Ad-hoc list" for comma-separated input)
-Base branch: {base}
-Target branch: {branch}
-Total prompts: {count}
-Waves: {wave count}
-
-Wave 1:
-  - {id}: {path}
-  - {id}: {path}
-
-Wave 2:
-  - {id}: {path} (after: {dep1}, {dep2})
-
+Base: {base} -> {branch}
+Prompts: {count} across {wave count} waves
 On complete: {create_pr / merge_to / none}
+
+| Wave | ID | Prompt | Dependencies | Model |
+|------|----|--------|--------------|-------|
+| 1 | {id} | {path} | - | claude |
+| 1 | {id} | {path} | - | claude |
+| 2 | {id} | {path} | {dep1} | codex |
+| 2 | {id} | {path} | {dep1}, {dep2} | claude |
+| 3* | {id} | {path} | {dep1}, {dep2} | claude |
+
+* = sink node
 ```
 
 <confirm_plan>
@@ -157,8 +172,21 @@ Orchestration cancelled.
 
 ### Step 5: Model Selection
 
+<model_selection_mode>
+First determine the execution mode. If `--model ?` or no model specified, ask:
+
+Question: "How should this workflow execute?"
+Options:
+- `agent-team` - Spawn a Claude Code agent team with shared task list and worktree-per-agent. Team lead coordinates, teammates pick up tasks as dependencies clear. Best for complex workflows.
+- `claude` - Claude Task subagents (one per prompt, parallel within waves)
+- `codex` - OpenAI Codex via codex CLI
+- `gemini` - Gemini 3 Flash via gemini CLI
+
+If `agent-team` is selected, skip per-prompt model selection. The team lead assigns work to teammates who each get their own worktree. Per-prompt `<model>` overrides in the XML are ignored in this mode.
+</model_selection_mode>
+
 <model_selection_per_prompt>
-If `--model ?` or no model specified, prompt for each prompt's model.
+For non-agent-team modes with `--model ?`: prompt for each prompt's model.
 
 For each prompt, check if it has a `<model>` override in the XML. If so, use it. Otherwise, use AskUserQuestion:
 
@@ -174,46 +202,123 @@ Store selections in a mapping: `{prompt_id: model}`
 </model_selection_per_prompt>
 
 <model_selection_batch>
-If `--model MODEL` specified, use that model for all prompts unless a prompt has a `<model>` override in the XML. XML-level overrides take precedence.
+If `--model MODEL` specified (not `?`), use that model for all prompts unless a prompt has a `<model>` override in the XML. XML-level overrides take precedence.
+
+If `--model agent-team`, go directly to agent-team execution (Step 6, agent-team path).
 
 Store: `{prompt_id: MODEL}` for all prompts.
 </model_selection_batch>
 
-### Step 6: Execute Waves
+### Step 6: Execute Prompts
 
-For each wave in order:
+Execution depends on the selected mode: **agent-team** or **task-based** (claude, codex, gemini, etc.).
 
-<execute_wave>
-**6a. Report wave start:**
-```
-Wave {N} Starting
-=================
-Prompts: {list of prompt IDs in this wave}
-```
+<execute_agent_team>
+#### 6A: Agent-Team Execution
 
-**6b. Spawn Task agents for all prompts in wave (PARALLEL):**
+Use Claude Code's TeamCreate to spawn a coordinated team. The team lead (you) manages the task list and assigns work as dependencies clear. Each teammate gets its own worktree automatically.
 
-Route through run-prompt when `--worktree` is specified (ensures worktree creation for all models).
-For Claude models without `--worktree`, spawn directly as Task subagents.
-For non-Claude models, always spawn Tasks that call run-prompt.
-
-CRITICAL: Spawn ALL tasks for the wave in a SINGLE message with multiple Task tool calls.
-
-<spawn_with_worktree>
-**If `--worktree` flag is set (any model):**
-
-All prompts route through run-prompt to leverage its worktree creation logic:
+**6A-1. Create the team:**
 
 ```
-# For each prompt in wave, spawn in parallel:
+TeamCreate(
+  team_name: "orchestrate-{workflow_id}",
+  description: "Executing workflow: {workflow_id}"
+)
+```
+
+**6A-2. Create tasks from prompts:**
+
+For each prompt in the workflow, create a task. Include dependency info so the team lead knows when to assign:
+
+```
+TaskCreate(
+  title: "[{prompt_id}] {path}",
+  description: """
+Prompt: {prompt_id}
+Path: {path}
+Dependencies: {comma-separated after IDs, or "none"}
+Wave: {wave_number}
+
+Execute the prompt file at {path} completely.
+""",
+  team_name: "orchestrate-{workflow_id}"
+)
+```
+
+**6A-3. Spawn teammates:**
+
+Spawn teammates for the initial wave of ready prompts (those with no dependencies). Use the Agent tool with `team_name` and `name` parameters. Each teammate gets `isolation: "worktree"`.
+
+```
+# For each ready prompt, spawn a teammate:
+Agent(
+  subagent_type: "general-purpose",
+  team_name: "orchestrate-{workflow_id}",
+  name: "{prompt_id}",
+  isolation: "worktree",
+  prompt: """
+You are a teammate executing prompt [{prompt_id}].
+
+Read and execute the prompt at: {path}
+
+When done, mark your task complete via TaskUpdate and send a message
+to the team lead summarizing what you accomplished.
+"""
+)
+```
+
+**6A-4. Continuous scheduling:**
+
+As teammates complete and go idle, check which prompts are now unblocked (all `<after>` dependencies completed). Assign newly ready prompts immediately. Do not wait for an entire wave to finish.
+
+Loop:
+1. Receive teammate completion message
+2. Mark their task done
+3. Check all remaining prompts: are any newly unblocked?
+4. For each newly ready prompt, either assign to an idle teammate or spawn a new one
+5. Repeat until all prompts are complete or a failure requires user input
+
+**6A-5. Handle failures:**
+
+If a teammate reports failure, use AskUserQuestion:
+- Retry the failed prompt with a new teammate
+- Skip it and continue (mark dependents as blocked)
+- Abort the workflow
+
+**6A-6. Shutdown:**
+
+When all prompts are complete, send shutdown messages to all teammates:
+
+```
+SendMessage(
+  to: "{teammate_name}",
+  message: { type: "shutdown_request" }
+)
+```
+</execute_agent_team>
+
+<execute_task_based>
+#### 6B: Task-Based Execution (claude, codex, gemini, etc.)
+
+Spawn Task subagents per prompt. Uses dependency-triggered scheduling: start each prompt as soon as its dependencies complete, not when an entire wave finishes.
+
+**6B-1. Start all ready prompts:**
+
+Identify every prompt with zero unmet dependencies. Spawn all of them in a SINGLE message with multiple Task tool calls.
+
+Route through run-prompt when `--worktree` is specified or when using non-Claude models:
+
+```
+# For each ready prompt, spawn in parallel:
 Task(
   subagent_type: "general-purpose",
-  run_in_background: true,  # if --background
+  run_in_background: true,
   prompt: """
-Execute prompt via run-prompt: {prompt_id} - {path}
+Execute prompt: {prompt_id} - {path}
 
 Call:
-/fm:run-prompt {prompt_path} --model {model} --worktree {--background}
+/fm:run-prompt {prompt_path} --model {model} {--worktree} {--background}
 
 Write results to .founder-mode/logs/{prompt_id}-result.json:
 {
@@ -226,46 +331,19 @@ Write results to .founder-mode/logs/{prompt_id}-result.json:
 """
 )
 ```
-</spawn_with_worktree>
 
-<spawn_without_worktree>
-**If no `--worktree` flag:**
+For Claude models without `--worktree`, spawn directly with the prompt content inlined instead of calling run-prompt.
 
-For Claude models, spawn directly as Task subagents.
-For non-Claude models, spawn Tasks that call run-prompt.
+**6B-2. Monitor and schedule:**
 
+As tasks complete, check which prompts are now unblocked. Spawn newly ready prompts immediately in the next message. Do not wait for all running tasks to finish.
+
+Track completion via result files:
+```bash
+test -f ".founder-mode/logs/${prompt_id}-result.json"
 ```
-# For each prompt in wave, spawn in parallel:
-Task(
-  subagent_type: "general-purpose",
-  run_in_background: true,  # if --background
-  prompt: """
-Execute prompt: {prompt_id} - {path}
 
-<task>
-{Read prompt file content}
-</task>
-
-Working directory: {cwd}
-Model: {selected_model}
-
-If non-Claude model, call:
-/fm:run-prompt {prompt_path} --model {model} {--background}
-
-Execute completely. Write results to .founder-mode/logs/{prompt_id}-result.json:
-{
-  "prompt_id": "{prompt_id}",
-  "status": "success|failed",
-  "summary": "what was accomplished",
-  "files_changed": ["list", "of", "files"],
-  "errors": []
-}
-"""
-)
-```
-</spawn_without_worktree>
-
-**6c. If --background with non-Claude, spawn monitors:**
+**6B-3. If --background with non-Claude, spawn monitors:**
 
 For each background execution, spawn a readonly-log-watcher:
 
@@ -284,50 +362,32 @@ Report status changes. Final report when complete or timeout.
 )
 ```
 
-**6d. Wait for wave completion:**
+**6B-4. Report progress:**
 
-If foreground execution: Tasks complete synchronously, proceed to next wave.
-
-If background execution: Poll result files until all prompts in wave complete.
-
-```bash
-# Check for completion
-for prompt_id in wave:
-    result_file=".founder-mode/logs/${prompt_id}-result.json"
-    if [ -f "$result_file" ]; then
-        status=$(jq -r '.status' "$result_file")
-        # Track completion
-    fi
-done
+After each batch of completions:
+```
+Progress: {completed}/{total} prompts
+  [{id}] DONE - {summary}
+  [{id}] DONE - {summary}
+  [{id}] RUNNING...
+  [{id}] READY (deps met, starting now)
+  [{id}] BLOCKED (waiting on: {dep1}, {dep2})
 ```
 
-**6e. Report wave results:**
-```
-Wave {N} Complete
-=================
-| Prompt | Status | Summary |
-|--------|--------|---------|
-| {id} | SUCCESS | {summary from result file} |
-| {id} | SUCCESS | {summary from result file} |
+**6B-5. Handle failures:**
 
-Proceeding to Wave {N+1}...
+If any prompt fails:
+```
+[{id}] FAILED - {error summary}
+
+Blocked by this failure: {list of downstream prompt IDs}
 ```
 
-**6f. Handle failures:**
-
-If any prompt in wave fails:
-```
-Wave {N} had failures:
-- {id}: FAILED - {error summary}
-
-Options:
-1. Retry failed prompts
-2. Skip and continue to next wave
-3. Abort orchestration
-```
-
-Use AskUserQuestion to let user decide.
-</execute_wave>
+Use AskUserQuestion:
+- Retry the failed prompt
+- Skip and unblock dependents
+- Abort orchestration
+</execute_task_based>
 
 ### Step 7: Process on_complete Actions
 
@@ -373,7 +433,7 @@ Logs: .founder-mode/logs/
 
 ## Examples
 
-**Run XML workflow:**
+**Run XML workflow (interactive model selection):**
 ```
 /fm:orchestrate prompts/monitor/workflow.xml
 ```
@@ -381,6 +441,11 @@ Logs: .founder-mode/logs/
 **Run specific workflow from multi-workflow file:**
 ```
 /fm:orchestrate prompts/workflows.xml direction-analyzer
+```
+
+**Run with agent team (coordinated parallel agents with worktrees):**
+```
+/fm:orchestrate prompts/monitor/workflow.xml --model agent-team
 ```
 
 **Run specific prompts (no deps, all parallel):**
