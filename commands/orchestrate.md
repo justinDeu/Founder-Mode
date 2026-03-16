@@ -1,7 +1,7 @@
 ---
 name: fm:orchestrate
 description: Execute multiple prompts with dependency management and parallel execution
-argument-hint: <orchestrator-file|prompt-list> [--model ?|claude|codex|...] [--pending-only]
+argument-hint: <workflow.xml|prompt-list> [--model ?|claude|codex|...] [--pending-only]
 allowed-tools:
   - Read
   - Write
@@ -19,9 +19,9 @@ Execute multiple prompts respecting dependencies. Prompts within the same wave r
 
 | Argument | Type | Default | Description |
 |----------|------|---------|-------------|
-| `<input>` | positional | required | Orchestrator .md file OR comma-separated prompt IDs |
+| `<input>` | positional | required | XML workflow file OR comma-separated prompt paths |
 | `--model` | option | `?` | Default model. Use `?` for per-prompt selection. |
-| `--pending-only` | flag | false | Skip prompts marked complete in orchestrator |
+| `--pending-only` | flag | false | Skip prompts marked complete in log files |
 | `--worktree` | flag | false | Create isolated worktree per prompt |
 | `--background` | flag | false | Run non-Claude models in background |
 
@@ -29,62 +29,89 @@ Execute multiple prompts respecting dependencies. Prompts within the same wave r
 
 ### Step 1: Parse Input
 
-<get_orchestrator_path>
-Locate orchestrator.py:
-```bash
-PLUGIN_ROOT=$(jq -r '.plugins."founder-mode@local"[0].installPath // empty' ~/.claude/plugins/installed_plugins.json 2>/dev/null)
-if [ -z "$PLUGIN_ROOT" ]; then
-    # Works in normal repos and worktrees
-    PLUGIN_ROOT=$(git rev-parse --show-toplevel 2>/dev/null)
-fi
-if [ -z "$PLUGIN_ROOT" ]; then
-    # Fallback for bare repo parent setups
-    PLUGIN_ROOT=$(git rev-parse --git-common-dir 2>/dev/null | sed 's|/\.bare$||; s|/\.git$||')
-fi
-ORCHESTRATOR="$PLUGIN_ROOT/scripts/orchestrator.py"
-```
-</get_orchestrator_path>
+Determine input type and extract execution plan.
 
-<parse_input>
-Call orchestrator.py to parse input:
+<detect_input_type>
+Check the input argument:
+- If it ends with `.xml` and the file exists: treat as XML workflow file (go to Step 1a)
+- If it contains commas or ends with `.md`: treat as comma-separated prompt list (go to Step 1b)
+- Otherwise: report error and exit
+</detect_input_type>
 
-```bash
-python3 "$ORCHESTRATOR" "{input}" --prompts-dir ./prompts {--pending-only}
-```
+#### Step 1a: Parse XML Workflow
 
-This returns JSON:
-```json
-{
-  "orchestrator": "/path/to/file.md",
-  "dependencies": {"003-01": [], "003-02": ["003-01"]},
-  "waves": [["003-01"], ["003-02", "003-03"]],
-  "prompts": {
-    "003-01": {
-      "id": "003-01",
-      "path": "/path/to/003-01-name.md",
-      "title": "Name",
-      "completed": false,
-      "dependencies": []
-    }
-  }
-}
-```
-</parse_input>
+<parse_xml_workflow>
+Read the XML workflow file using the Read tool. Claude reads XML natively with no parser needed.
 
-<validate_input>
-If no prompts found:
-```
-No prompts found matching input: {input}
+Extract the following from the XML:
 
-Check that:
-- Orchestrator file exists and has valid format
-- Prompt IDs match files in ./prompts/
-- Use --pending-only only if orchestrator has state tracking
-```
-Exit without proceeding.
-</validate_input>
+1. **Workflow metadata** from `<workflow>` attributes:
+   - `id` - workflow identifier
+   - `base` - base branch
+   - `branch` - target branch
 
-### Step 2: Display Execution Plan and Confirm
+2. **Completion actions** from `<on_complete>` attributes:
+   - `create_pr` or `merge_to` (mutually exclusive)
+   - `delete_worktree`
+
+3. **Prompt list** from each `<prompt>` element:
+   - `id` attribute - prompt identifier
+   - `<path>` child - file path to prompt
+   - `<after>` children - dependency IDs (zero or more)
+   - `<model>` child - model override (optional)
+
+If the file contains multiple `<workflow>` elements, the second positional argument selects which one. If there is only one workflow, no selection is needed.
+</parse_xml_workflow>
+
+#### Step 1b: Parse Comma-Separated Prompt List
+
+<parse_prompt_list>
+Split input on commas. Each entry is a path to a prompt .md file.
+
+All prompts run in a single wave with no dependencies between them.
+
+Build the execution plan:
+- One wave containing all prompts
+- No dependency edges
+- No workflow metadata (ad-hoc execution)
+</parse_prompt_list>
+
+### Step 2: Validate the DAG
+
+<validate_dag>
+Before executing, validate the dependency graph:
+
+1. **Unique IDs**: Every `<prompt>` must have a unique `id`. If duplicates exist, report them and exit.
+
+2. **Valid references**: Every `<after>` value must match the `id` of another prompt in the workflow. Report any dangling references.
+
+3. **Files exist**: Every `<path>` must point to an existing file. Check each with:
+   ```bash
+   test -f "{path}"
+   ```
+   Report any missing files.
+
+4. **No cycles**: Perform a topological sort. If it fails, a cycle exists. Report the involved prompt IDs and exit.
+
+5. **Single sink**: Identify prompts that no other prompt lists in an `<after>`. There must be exactly one. If zero or more than one, report the issue and exit.
+
+6. **All paths reach sink**: Starting from the sink, walk backward through dependencies. Every prompt must be reachable. Report any unreachable prompts.
+
+If validation fails, display all errors and exit without executing.
+</validate_dag>
+
+### Step 3: Compute Waves
+
+<compute_waves>
+Group prompts into execution waves using topological layering:
+
+- **Wave 1**: All prompts with zero `<after>` dependencies (source nodes)
+- **Wave N**: All prompts whose every dependency appears in waves 1 through N-1
+
+Store the wave assignments for display and execution.
+</compute_waves>
+
+### Step 4: Display Execution Plan and Confirm
 
 Show the user what will be executed:
 
@@ -92,21 +119,20 @@ Show the user what will be executed:
 Execution Plan
 ==============
 
-Orchestrator: {orchestrator path or "Ad-hoc list"}
+Workflow: {id} (or "Ad-hoc list" for comma-separated input)
+Base branch: {base}
+Target branch: {branch}
 Total prompts: {count}
 Waves: {wave count}
 
 Wave 1:
-  - 003-01: State Management Foundation
-  - 003-02: New Project Command (depends on: 003-01)
+  - {id}: {path}
+  - {id}: {path}
 
 Wave 2:
-  - 003-03: Discuss Phase (depends on: 003-02)
-  - 003-04: Plan Phase (depends on: 003-03)
+  - {id}: {path} (after: {dep1}, {dep2})
 
-{if --pending-only}
-Skipped (already complete): 003-01, 003-02
-{/if}
+On complete: {create_pr / merge_to / none}
 ```
 
 <confirm_plan>
@@ -121,7 +147,7 @@ Options:
 If user selects "Modify", ask what they want to change:
 - Different prompt list
 - Different flags (--pending-only, --background, etc.)
-- Different orchestrator file
+- Different workflow file
 
 If user selects "Cancel", exit with:
 ```
@@ -129,14 +155,14 @@ Orchestration cancelled.
 ```
 </confirm_plan>
 
-### Step 3: Model Selection
+### Step 5: Model Selection
 
 <model_selection_per_prompt>
-If `--model ?` or no model specified, prompt for each prompt's model:
+If `--model ?` or no model specified, prompt for each prompt's model.
 
-For each prompt, use AskUserQuestion:
+For each prompt, check if it has a `<model>` override in the XML. If so, use it. Otherwise, use AskUserQuestion:
 
-Question: "Select model for {prompt_id}: {title}"
+Question: "Select model for {prompt_id}: {path}"
 Options:
 - `claude` - Claude in Task subagent
 - `codex` - OpenAI Codex (gpt-5.2-codex)
@@ -148,24 +174,24 @@ Store selections in a mapping: `{prompt_id: model}`
 </model_selection_per_prompt>
 
 <model_selection_batch>
-If `--model MODEL` specified, use that model for all prompts.
+If `--model MODEL` specified, use that model for all prompts unless a prompt has a `<model>` override in the XML. XML-level overrides take precedence.
 
 Store: `{prompt_id: MODEL}` for all prompts.
 </model_selection_batch>
 
-### Step 4: Execute Waves
+### Step 6: Execute Waves
 
 For each wave in order:
 
 <execute_wave>
-**4a. Report wave start:**
+**6a. Report wave start:**
 ```
 Wave {N} Starting
 =================
 Prompts: {list of prompt IDs in this wave}
 ```
 
-**4b. Spawn Task agents for all prompts in wave (PARALLEL):**
+**6b. Spawn Task agents for all prompts in wave (PARALLEL):**
 
 Route through run-prompt when `--worktree` is specified (ensures worktree creation for all models).
 For Claude models without `--worktree`, spawn directly as Task subagents.
@@ -184,7 +210,7 @@ Task(
   subagent_type: "general-purpose",
   run_in_background: true,  # if --background
   prompt: """
-Execute prompt via run-prompt: {prompt_id} - {title}
+Execute prompt via run-prompt: {prompt_id} - {path}
 
 Call:
 /fm:run-prompt {prompt_path} --model {model} --worktree {--background}
@@ -214,7 +240,7 @@ Task(
   subagent_type: "general-purpose",
   run_in_background: true,  # if --background
   prompt: """
-Execute prompt: {prompt_id} - {title}
+Execute prompt: {prompt_id} - {path}
 
 <task>
 {Read prompt file content}
@@ -239,7 +265,7 @@ Execute completely. Write results to .founder-mode/logs/{prompt_id}-result.json:
 ```
 </spawn_without_worktree>
 
-**4c. If --background with non-Claude, spawn monitors:**
+**6c. If --background with non-Claude, spawn monitors:**
 
 For each background execution, spawn a readonly-log-watcher:
 
@@ -258,7 +284,7 @@ Report status changes. Final report when complete or timeout.
 )
 ```
 
-**4d. Wait for wave completion:**
+**6d. Wait for wave completion:**
 
 If foreground execution: Tasks complete synchronously, proceed to next wave.
 
@@ -275,24 +301,24 @@ for prompt_id in wave:
 done
 ```
 
-**4e. Report wave results:**
+**6e. Report wave results:**
 ```
 Wave {N} Complete
 =================
 | Prompt | Status | Summary |
 |--------|--------|---------|
-| 003-01 | SUCCESS | Created templates and utilities |
-| 003-02 | SUCCESS | Implemented new-project command |
+| {id} | SUCCESS | {summary from result file} |
+| {id} | SUCCESS | {summary from result file} |
 
 Proceeding to Wave {N+1}...
 ```
 
-**4f. Handle failures:**
+**6f. Handle failures:**
 
 If any prompt in wave fails:
 ```
 Wave {N} had failures:
-- 003-02: FAILED - {error summary}
+- {id}: FAILED - {error summary}
 
 Options:
 1. Retry failed prompts
@@ -303,7 +329,24 @@ Options:
 Use AskUserQuestion to let user decide.
 </execute_wave>
 
-### Step 5: Final Report
+### Step 7: Process on_complete Actions
+
+<on_complete_actions>
+After all waves finish successfully, process the `<on_complete>` element:
+
+**If `create_pr="true"`:**
+Create a pull request from `branch` to `base` using gh CLI.
+
+**If `merge_to` is set:**
+Merge the working branch into the specified branch.
+
+**If `delete_worktree="true"`:**
+Remove the worktree after completion actions finish.
+
+Skip on_complete processing if any prompts failed.
+</on_complete_actions>
+
+### Step 8: Final Report
 
 After all waves complete:
 
@@ -311,6 +354,7 @@ After all waves complete:
 Orchestration Complete
 ======================
 
+Workflow: {id}
 Total prompts: {N}
 Successful: {N}
 Failed: {N}
@@ -319,79 +363,79 @@ Skipped: {N}
 Results by wave:
 | Wave | Prompts | Status |
 |------|---------|--------|
-| 1 | 003-01, 003-02 | Complete |
-| 2 | 003-03, 003-04 | Complete |
+| 1 | {ids} | Complete |
+| 2 | {ids} | Complete |
 
-{if orchestrator file}
-Updated state in: {orchestrator path}
-{/if}
+On complete: {action taken or "none"}
 
 Logs: .founder-mode/logs/
 ```
 
-### Step 6: Update Orchestrator State (if applicable)
-
-If input was an orchestrator file with state tracking, update completion checkboxes:
-
-Read the orchestrator file, find state tracking section, update:
-```
-[x] 003-01-state-management.md
-[x] 003-02-new-project.md
-[ ] 003-03-discuss-phase.md  <- still pending if failed
-```
-
-Write updated file.
-
 ## Examples
 
-**Run orchestrator file:**
+**Run XML workflow:**
 ```
-/fm:orchestrate prompts/phase-completion/000-orchestrator.md
+/fm:orchestrate prompts/monitor/workflow.xml
+```
+
+**Run specific workflow from multi-workflow file:**
+```
+/fm:orchestrate prompts/workflows.xml direction-analyzer
 ```
 
 **Run specific prompts (no deps, all parallel):**
 ```
-/fm:orchestrate 003-01,003-02,003-03 --model codex
+/fm:orchestrate prompts/001-setup.md,prompts/002-core.md,prompts/003-tests.md --model codex
 ```
 
-**Run pending prompts only:**
+**Run with worktrees and background:**
 ```
-/fm:orchestrate prompts/phase-completion/000-orchestrator.md --pending-only
-```
-
-**Run in background with worktrees:**
-```
-/fm:orchestrate 003-01,003-02 --model codex --background --worktree
+/fm:orchestrate prompts/monitor/workflow.xml --model codex --background --worktree
 ```
 
 ## Error Handling
 
-<error_orchestrator_not_found>
-If orchestrator.py not found:
+<error_file_not_found>
+If workflow file not found:
 ```
-Orchestrator script not found.
+Workflow file not found: {path}
 
-Expected: {expected_path}
-
-Ensure founder-mode is properly installed.
+Check that the file exists and is a valid .xml workflow file.
+See references/workflow-xml-schema.md for the XML format.
 ```
-</error_orchestrator_not_found>
+</error_file_not_found>
 
-<error_parse_failed>
-If parsing fails:
+<error_invalid_xml>
+If XML is malformed or missing required elements:
 ```
-Failed to parse input: {error}
+Invalid workflow XML: {error}
 
-For orchestrator files, ensure:
-- File has "## Dependency Graph" section
-- Prompt IDs follow NNN-NN pattern
-- Execution order is defined
+Required structure:
+  <workflow id="..." base="..." branch="...">
+    <prompt id="...">
+      <path>...</path>
+    </prompt>
+  </workflow>
 
-For prompt lists:
-- Use comma-separated IDs: 003-01,003-02,003-03
-- IDs must match files in ./prompts/
+See references/workflow-xml-schema.md for full schema.
 ```
-</error_parse_failed>
+</error_invalid_xml>
+
+<error_dag_validation>
+If DAG validation fails:
+```
+Workflow DAG validation failed:
+
+{list of specific errors, e.g.:
+- Prompt "foo" references unknown dependency "bar"
+- Cycle detected: a -> b -> c -> a
+- Multiple sink nodes: "x", "y" (expected exactly one)
+- Prompt "z" is unreachable from any source
+}
+
+Fix the workflow XML and retry.
+```
+</error_dag_validation>
 
 <error_circular_deps>
 If circular dependency detected:
@@ -400,6 +444,6 @@ Circular dependency detected.
 
 Cannot resolve execution order for: {prompt IDs}
 
-Check dependency graph in orchestrator file.
+Check <after> elements in the workflow XML.
 ```
 </error_circular_deps>
