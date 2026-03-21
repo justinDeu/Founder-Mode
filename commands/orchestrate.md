@@ -7,6 +7,7 @@ allowed-tools:
   - Write
   - Bash
   - Glob
+  - Agent
   - Task
   - AskUserQuestion
   - TeamCreate
